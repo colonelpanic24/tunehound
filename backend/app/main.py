@@ -64,9 +64,6 @@ async def lifespan(app: FastAPI):
     # Start background worker
     worker_task = asyncio.create_task(_download_worker())
 
-    # Ensure data directories exist
-    os.makedirs(_IMAGES_DIR, exist_ok=True)
-
     # Start filesystem watcher
     loop = asyncio.get_event_loop()
     if os.path.isdir(settings.music_library_path):
@@ -106,6 +103,7 @@ app.include_router(ws.router)  # /ws (no /api prefix — WebSocket)
 # ── Serve locally cached images ────────────────────────────────────────────────
 
 _IMAGES_DIR = os.path.join(settings.data_dir, "images")
+os.makedirs(_IMAGES_DIR, exist_ok=True)
 app.mount("/images", StaticFiles(directory=_IMAGES_DIR), name="images")
 
 # ── Serve React SPA ────────────────────────────────────────────────────────────
