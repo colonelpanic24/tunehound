@@ -24,6 +24,7 @@ dependencies = [
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-mock>=3.14",
     "httpx>=0.28",
     "anyio>=4.0",
     "ruff>=0.9",
