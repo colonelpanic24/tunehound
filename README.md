@@ -2,6 +2,12 @@
 
 Self-hosted music library manager. Subscribe to artists, automatically discover their discography via MusicBrainz, download audio from YouTube with yt-dlp, and keep your local library organized and tagged.
 
+TuneHound touches on features you see in MusicBrainz Picard and Lidarr, with a tighter focus on:
+* Library maintenance: Tagging your music library (text metadata and artwork)
+* Library completeness: Downloading (via yt-dlp) for missing artists, albums, _or_ tracks
+
+TuneHound has limited write ability. It can write new tags and artwork to your existing music, download new tracks, and in very specific scenario, delete. The goal is to make your music library clean and complete without makin
+
 ## Features
 
 - Subscribe to artists and track their full discography (albums, EPs, singles)
@@ -11,6 +17,12 @@ Self-hosted music library manager. Subscribe to artists, automatically discover 
 - Tag files with MusicBrainz metadata and Cover Art Archive artwork
 - Browse your library by artist or album with cover art
 - SponsorBlock support, cookies for YouTube Premium, proxy support
+
+
+## Is this AI slop?
+
+Yes. Don't use it.
+
 
 ## Quick Start
 
@@ -29,14 +41,19 @@ docker compose up -d
 
 Open `http://localhost:8000`.
 
+## Installing in Docker
+
+TBD
+
+
 ## Configuration
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MUSIC_DIR` | `/mnt/media/music` | Path to your music directory on the host |
-| `PORT` | `8000` | Host port to expose |
+| `MUSIC_DIR` | `/music` | Path to your music directory on the host |
+| `PORT` | `8000` | Host port to expose the UI |
 
 ### Application Settings
 
@@ -94,11 +111,11 @@ Requires Python 3.11+, Node 22+, and ffmpeg.
 
 This starts a tmux session with the backend (port 8000, hot-reload) and frontend dev server (port 5173) in separate windows.
 
-Or use Docker with the dev override:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-```
+Cheat sheet:
+ctrl-b, n - Go to next terminal
+ctrl-b, d - Detach your terminal from the session but keep it running
+`tmux a` - Reattach your terminal to the session
+ctrl-b, R - (that's shift-r) Restart both servers. Will apply migrations if new ones exist.
 
 ## Stack
 
