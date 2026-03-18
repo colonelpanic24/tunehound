@@ -10,7 +10,7 @@ services:
     build:
       context: .
       target: frontend-builder   # stop after frontend stage — we don't need it here
-    image: node:22-alpine
+    image: node:24-alpine
     working_dir: /frontend
     volumes:
       - ./frontend:/frontend

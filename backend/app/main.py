@@ -1,16 +1,11 @@
 import asyncio
-import json
 import os
-import re
-import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
 
 from app.api import albums, artists, downloads, library, retag, stats, ws
 from app.api.ws import manager as ws_manager
@@ -85,106 +80,9 @@ async def lifespan(app: FastAPI):
         pass
 
 
-# ── External URL kill-switch ───────────────────────────────────────────────────
-#
-# THIS IS AN INTENTIONAL NUCLEAR OPTION.
-#
-# We cache all external images locally so the browser never has to reach out to
-# wikimedia, archive.org, or any other third-party host. This has burned us
-# before: buggy code stored raw external URLs in the DB and they leaked through
-# to the frontend, causing the browser to make external requests on every page
-# load. To make sure that NEVER happens again, this middleware inspects every
-# JSON API response body and crashes the entire server process if it finds an
-# http:// or https:// URL in a field that is supposed to hold a local path.
-#
-# Why os._exit instead of raising an exception?
-# - A regular exception would be caught by FastAPI and turned into a 500 — the
-#   bug would silently continue serving bad data.
-# - os._exit(1) is immediate and ungraceful: it bypasses all exception handlers,
-#   context managers, and atexit hooks. The process dies instantly. The dev
-#   server (uvicorn --reload) will restart it, but the bad response is never
-#   sent. You will see the crash in the terminal and know exactly what happened.
-#
-# Checked fields (the only ones that should ever hold image paths):
-#   - image_url  (Artist)
-#   - cover_art_url  (ReleaseGroup)
-#
-# A valid value is either null or a path starting with /images/. Anything
-# starting with http is a bug. We die.
-
-_EXTERNAL_URL_RE = re.compile(r"https?://")
-_WATCHED_FIELDS = {"image_url", "cover_art_url"}
-
-
-class ExternalUrlKillSwitch(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next) -> Response:
-        response = await call_next(request)
-
-        # Only inspect JSON responses from our API routes
-        content_type = response.headers.get("content-type", "")
-        if not request.url.path.startswith("/api/") or "application/json" not in content_type:
-            return response
-
-        # Buffer the response body so we can inspect it
-        body_bytes = b""
-        async for chunk in response.body_iterator:
-            body_bytes += chunk
-
-        # Parse and scan for external URLs in watched fields
-        try:
-            data = json.loads(body_bytes)
-        except Exception:
-            # Not valid JSON — pass through unchanged
-            pass
-        else:
-            _scan_for_external_urls(data, request.url.path)
-
-        # Reconstruct the response with the original body
-        return Response(
-            content=body_bytes,
-            status_code=response.status_code,
-            headers=dict(response.headers),
-            media_type=response.media_type,
-        )
-
-
-def _scan_for_external_urls(obj, path: str) -> None:
-    """
-    Recursively walk a decoded JSON value and check every watched field.
-    If an external URL is found, log it loudly and kill the process.
-    """
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            if key in _WATCHED_FIELDS and isinstance(value, str):
-                if _EXTERNAL_URL_RE.match(value):
-                    # Log before dying so the dev can see exactly what happened
-                    print(
-                        f"\n\n"
-                        f"╔══════════════════════════════════════════════════════╗\n"
-                        f"║  KILL-SWITCH TRIGGERED — EXTERNAL URL IN API RESPONSE ║\n"
-                        f"╠══════════════════════════════════════════════════════╣\n"
-                        f"║  endpoint : {path}\n"
-                        f"║  field    : {key}\n"
-                        f"║  value    : {value}\n"
-                        f"╚══════════════════════════════════════════════════════╝\n",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                    # Die immediately — no exception, no handler, no mercy.
-                    os._exit(1)
-            elif isinstance(value, (dict, list)):
-                _scan_for_external_urls(value, path)
-    elif isinstance(obj, list):
-        for item in obj:
-            _scan_for_external_urls(item, path)
-
-
 # ── FastAPI app ────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="TuneHound", version="0.1.0", lifespan=lifespan)
-
-# Kill-switch must be added before CORSMiddleware so it runs on the way out
-app.add_middleware(ExternalUrlKillSwitch)
 
 app.add_middleware(
     CORSMiddleware,
