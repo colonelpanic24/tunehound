@@ -1,0 +1,45 @@
+# Development override: hot-reload for both frontend and backend.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Or just run locally without Docker:
+#   cd backend && pip install -e . && alembic upgrade head && uvicorn app.main:app --reload
+#   cd frontend && npm install && npm run dev
+
+services:
+  tunehound:
+    build:
+      context: .
+      target: frontend-builder   # stop after frontend stage — we don't need it here
+    image: node:24-alpine
+    working_dir: /frontend
+    volumes:
+      - ./frontend:/frontend
+      - /frontend/node_modules
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+
+  backend-dev:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - tunehound_data:/data
+    command: >
+      sh -c "apt-get update && apt-get install -y ffmpeg &&
+             pip install -e . &&
+             alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    environment:
+      MUSIC_LIBRARY_PATH: /music
+      DATABASE_URL: sqlite+aiosqlite:////data/tunehound.db
+      DATA_DIR: /data
+    volumes:
+      - ./backend:/app
+      - ${MUSIC_DIR:-/mnt/media/music}:/music
+      - tunehound_data:/data
+
+volumes:
+  tunehound_data:

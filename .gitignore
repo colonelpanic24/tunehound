@@ -1,0 +1,28 @@
+# Environment
+.env
+
+# Claude memory/project files
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# DB / data
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/

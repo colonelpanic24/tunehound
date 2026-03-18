@@ -1,0 +1,18 @@
+services:
+  tunehound:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ${MUSIC_DIR:-/mnt/media/music}:/music
+      - tunehound_data:/data
+    environment:
+      MUSIC_LIBRARY_PATH: /music
+      DATABASE_URL: sqlite+aiosqlite:////data/tunehound.db
+      DATA_DIR: /data
+    # Optional: mount a cookies.txt for YouTube Premium auth
+    # - ./cookies.txt:/data/cookies.txt:ro
+
+volumes:
+  tunehound_data:
