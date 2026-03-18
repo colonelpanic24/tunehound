@@ -1,7 +1,7 @@
 # ── Stage 1: build the React frontend ─────────────────────────────────────────
 FROM node:24-alpine AS frontend-builder
 WORKDIR /frontend
-COPY frontend/package*.json ./
+COPY frontend/package*.json frontend/.npmrc ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
