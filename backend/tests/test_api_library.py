@@ -187,6 +187,127 @@ async def test_orphaned_files_detects_unlinked(client, db_session, tmp_path, moc
     assert data["items"][0]["filename"] == "orphan.mp3"
 
 
+
+# ── POST /api/library/sync-files ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_sync_files_no_artists(client):
+    r = await client.post("/api/library/sync-files")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["artists_processed"] == 0
+    assert data["files_linked"] == 0
+    assert data["files_unlinked"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_files_clears_broken_links(client, db_session, tmp_path, mocker):
+    mocker.patch("app.api.library.settings.music_library_path", str(tmp_path))
+    # Patch scanner.link_existing_files and scanner.link_album_folders to no-ops
+    mocker.patch("app.services.scanner.link_existing_files", return_value=0)
+    mocker.patch("app.services.scanner.link_album_folders", return_value=None)
+
+    artist = await seed_artist(db_session, folder_name="MyArtist")
+    (tmp_path / "MyArtist").mkdir()
+    rg = await seed_release_group(db_session, artist_id=artist.id)
+    # Track pointing to a file that doesn't exist
+    track = await seed_track(
+        db_session, release_group_id=rg.id, file_path=str(tmp_path / "MyArtist" / "gone.mp3")
+    )
+
+    r = await client.post("/api/library/sync-files")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["artists_processed"] == 1
+    assert data["files_unlinked"] == 1
+
+    await db_session.refresh(track)
+    assert track.file_path is None
+
+
+@pytest.mark.asyncio
+async def test_sync_files_keeps_valid_links(client, db_session, tmp_path, mocker):
+    mocker.patch("app.api.library.settings.music_library_path", str(tmp_path))
+    mocker.patch("app.services.scanner.link_existing_files", return_value=0)
+    mocker.patch("app.services.scanner.link_album_folders", return_value=None)
+
+    artist = await seed_artist(db_session, folder_name="MyArtist")
+    (tmp_path / "MyArtist").mkdir()
+    rg = await seed_release_group(db_session, artist_id=artist.id)
+    real_file = tmp_path / "MyArtist" / "real.mp3"
+    real_file.write_bytes(b"\xff\xfb" * 10)
+    track = await seed_track(
+        db_session, release_group_id=rg.id, file_path=str(real_file)
+    )
+
+    r = await client.post("/api/library/sync-files")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["files_unlinked"] == 0
+
+    await db_session.refresh(track)
+    assert track.file_path is not None
+
+
+# ── POST /api/library/rescan-tags ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_rescan_tags_no_tracks(client):
+    r = await client.post("/api/library/rescan-tags")
+    assert r.status_code == 200
+    assert r.json()["tracks_updated"] == 0
+
+
+@pytest.mark.asyncio
+async def test_rescan_tags_updates_linked_tracks(client, db_session, tmp_path, mocker):
+    # Seed a track with a real file path
+    artist = await seed_artist(db_session)
+    rg = await seed_release_group(db_session, artist_id=artist.id)
+    fake_file = tmp_path / "track.mp3"
+    fake_file.write_bytes(b"\xff\xfb" * 10)
+    track = await seed_track(
+        db_session, release_group_id=rg.id, file_path=str(fake_file)
+    )
+
+    from app.services.tag_reader import TagSnapshot
+
+    fake_snap = TagSnapshot(
+        title="New Title",
+        artist="New Artist",
+        album="New Album",
+        track_number="3",
+        art_hash=None,
+    )
+    mocker.patch("app.api.library.read_tags", return_value=fake_snap)
+
+    r = await client.post("/api/library/rescan-tags")
+    assert r.status_code == 200
+    assert r.json()["tracks_updated"] == 1
+
+    await db_session.refresh(track)
+    assert track.tag_title == "New Title"
+    assert track.tag_artist == "New Artist"
+
+
+@pytest.mark.asyncio
+async def test_rescan_tags_skips_missing_files(client, db_session, tmp_path, mocker):
+    artist = await seed_artist(db_session)
+    rg = await seed_release_group(db_session, artist_id=artist.id)
+    # file_path set but file doesn't exist
+    await seed_track(
+        db_session, release_group_id=rg.id, file_path=str(tmp_path / "missing.mp3")
+    )
+
+    read_tags_mock = mocker.patch("app.api.library.read_tags")
+
+    r = await client.post("/api/library/rescan-tags")
+    assert r.status_code == 200
+    assert r.json()["tracks_updated"] == 0
+    read_tags_mock.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_orphaned_files_linked_not_returned(client, db_session, tmp_path, mocker):
     mocker.patch("app.api.library.settings.music_library_path", str(tmp_path))

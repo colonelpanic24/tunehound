@@ -1,14 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
-  Music2, Disc3, ListMusic, HardDrive, Download, Plus, ScanLine, FileAudio, Square,
+  ListMusic, HardDrive, Download, Plus, ScanLine, FileAudio, Square, Link, Tag,
 } from "lucide-react";
-import { getStats, listArtists, getOrphanedFiles } from "@/api/client";
+import { getStats, getOrphanedFiles, syncFileLinks, rescanTags } from "@/api/client";
 import AddArtistModal from "@/components/AddArtistModal";
 import { useImport } from "@/context/ImportContext";
 import { ArtistSearchDialog } from "@/components/ArtistSearchDialog";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,9 +20,9 @@ import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { Artist, OrphanedFile } from "@/types";
+import type { OrphanedFile } from "@/types";
 
-type LibTab = "import" | "orphaned";
+type LibTab = "import" | "review" | "orphaned";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -39,10 +38,9 @@ export default function DashboardPage() {
   const [libTab, setLibTab] = useState<LibTab>("import");
 
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: getStats, staleTime: 30_000 });
-  const { data: artists = [] } = useQuery({ queryKey: ["artists"], queryFn: listArtists });
 
   const { state, startScan, cancelScan, reset, importReviewItem, skipReviewItem } = useImport();
-  const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, summary, error, needsReview } = state;
+  const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, summary, error, needsReview, completedAt } = state;
   const importActive = phase === "scanning";
 
   const orphanedQuery = useInfiniteQuery({
@@ -53,10 +51,6 @@ export default function DashboardPage() {
     enabled: libTab === "orphaned",
   });
 
-  const recentArtists = [...artists]
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 8);
-
   const downloadActive = (stats?.active_downloads ?? 0) > 0;
   const downloadProgress =
     downloadActive && stats!.download_tracks_total > 0
@@ -66,55 +60,83 @@ export default function DashboardPage() {
   const orphanTotal = orphanedQuery.data?.pages[0]?.total;
 
   return (
-    <div className="p-8 max-w-5xl">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground mt-0.5 text-sm">Your library at a glance</p>
+    <div className="flex flex-col min-h-full">
+      {/* Top bar: tabs left, stats + actions right */}
+      <div className="border-b border-border px-6 pt-4">
+        <div className="flex items-end justify-between">
+          <Tabs value={libTab} onValueChange={(v) => setLibTab(v as LibTab)}>
+            <TabsList variant="line" className="h-auto gap-0">
+              <TabsTrigger value="import" className="px-4 py-3 rounded-none gap-2">
+                Import
+                {importActive && (
+                  <Badge variant="default" className="h-4 px-1.5 text-xs animate-pulse">•</Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="review" className="px-4 py-3 rounded-none gap-2">
+                Needs Review
+                {needsReview.length > 0 && (
+                  <Badge
+                    variant={libTab === "review" ? "default" : "secondary"}
+                    className="h-4 px-1.5 text-xs"
+                  >
+                    {needsReview.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="orphaned" className="px-4 py-3 rounded-none gap-2">
+                Orphaned Files
+                {orphanTotal !== undefined && orphanTotal > 0 && (
+                  <Badge
+                    variant={libTab === "orphaned" ? "default" : "secondary"}
+                    className="h-4 px-1.5 text-xs"
+                  >
+                    {orphanTotal.toLocaleString()}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {/* Inline stats + Add Artist */}
+          <div className="flex items-center gap-5 pb-3">
+            {stats !== undefined && (
+              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <ListMusic className="w-3.5 h-3.5" />
+                  {stats.tracks.toLocaleString()} tracks
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <HardDrive className="w-3.5 h-3.5" />
+                  {stats.files_linked.toLocaleString()} files on disk
+                </span>
+              </div>
+            )}
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="w-4 h-4" />
+              Add Artist
+            </Button>
+          </div>
         </div>
-        <Button onClick={() => setAddOpen(true)}>
-          <Plus className="w-4 h-4" />
-          Add Artist
-        </Button>
       </div>
 
-      {folderNotice && (
-        <div className="mb-6 px-4 py-3 rounded-lg bg-muted border border-border text-sm text-foreground flex items-center justify-between gap-4">
-          <span>
-            Artist folder <span className="font-medium">"{folderNotice}"</span> already exists in your library and has been linked.
-          </span>
-          <button
-            onClick={() => setFolderNotice(null)}
-            className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      {/* Content */}
+      <div className="p-6 flex-1 space-y-4">
+        {folderNotice && (
+          <div className="px-4 py-3 rounded-lg bg-muted border border-border text-sm text-foreground flex items-center justify-between gap-4">
+            <span>
+              Artist folder <span className="font-medium">"{folderNotice}"</span> already exists in your library and has been linked.
+            </span>
+            <button
+              onClick={() => setFolderNotice(null)}
+              className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
-      <div className="space-y-10">
-        {/* Stats strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <StatCard
-            icon={<Music2 className="w-4 h-4" />}
-            label="Artists"
-            value={stats?.artists}
-            onClick={() => navigate("/artists")}
-          />
-          <StatCard
-            icon={<Disc3 className="w-4 h-4" />}
-            label="Albums"
-            value={stats?.albums}
-            onClick={() => navigate("/albums")}
-          />
-          <StatCard icon={<ListMusic className="w-4 h-4" />} label="Tracks" value={stats?.tracks} />
-          <StatCard icon={<HardDrive className="w-4 h-4" />} label="Files on Disk" value={stats?.files_linked} />
-        </div>
-
-        {/* Active download progress */}
         {downloadActive && (
-          <div className="rounded-xl border border-border bg-card px-5 py-4 space-y-2.5">
+          <div className="rounded-xl border border-border bg-card px-5 py-4 space-y-2.5 max-w-sm">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-foreground flex items-center gap-2">
                 <Download className="w-4 h-4 text-primary" />
@@ -132,79 +154,32 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Recently added */}
-        {recentArtists.length > 0 && (
-          <section>
-            <div className="flex items-baseline justify-between mb-4">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                Recently Added
-              </h2>
-              <button onClick={() => navigate("/artists")} className="text-xs text-primary hover:underline">
-                All artists
-              </button>
-            </div>
-            <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-3">
-              {recentArtists.map((artist) => (
-                <RecentArtistTile
-                  key={artist.id}
-                  artist={artist}
-                  onClick={() => navigate(`/artists/${artist.id}`)}
-                />
-              ))}
-            </div>
-          </section>
+        {libTab === "import" && (
+          <ImportTab
+            isActive={importActive}
+            phase={phase}
+            scanDone={scanDone}
+            scanTotal={scanTotal}
+            importDone={importDone}
+            importTotal={importTotal}
+            currentStep={currentStep}
+            log={log}
+            summary={summary}
+            completedAt={completedAt}
+            error={error}
+            startScan={startScan}
+            cancelScan={cancelScan}
+            reset={reset}
+          />
         )}
-
-        {/* Library tools */}
-        <section>
-          <div className="border-b border-border -mx-8 px-8 mb-6">
-            <Tabs value={libTab} onValueChange={(v) => setLibTab(v as LibTab)}>
-              <TabsList variant="line" className="h-auto gap-0">
-                <TabsTrigger value="import" className="px-4 py-3 rounded-none gap-2">
-                  Import
-                  {importActive && (
-                    <Badge variant="default" className="h-4 px-1.5 text-xs animate-pulse">
-                      •
-                    </Badge>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="orphaned" className="px-4 py-3 rounded-none gap-2">
-                  Orphaned Files
-                  {orphanTotal !== undefined && orphanTotal > 0 && (
-                    <Badge
-                      variant={libTab === "orphaned" ? "default" : "secondary"}
-                      className="h-4 px-1.5 text-xs"
-                    >
-                      {orphanTotal.toLocaleString()}
-                    </Badge>
-                  )}
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-
-          {libTab === "import" && (
-            <ImportTab
-              isActive={importActive}
-              phase={phase}
-              scanDone={scanDone}
-              scanTotal={scanTotal}
-              importDone={importDone}
-              importTotal={importTotal}
-              currentStep={currentStep}
-              log={log}
-              summary={summary}
-              error={error}
-              needsReview={needsReview}
-              startScan={startScan}
-              cancelScan={cancelScan}
-              reset={reset}
-              importReviewItem={importReviewItem}
-              skipReviewItem={skipReviewItem}
-            />
-          )}
-          {libTab === "orphaned" && <OrphanedTab query={orphanedQuery} />}
-        </section>
+        {libTab === "review" && (
+          <NeedsReviewTab
+            needsReview={needsReview}
+            importReviewItem={importReviewItem}
+            skipReviewItem={skipReviewItem}
+          />
+        )}
+        {libTab === "orphaned" && <OrphanedTab query={orphanedQuery} />}
       </div>
 
       {addOpen && (
@@ -219,74 +194,22 @@ export default function DashboardPage() {
   );
 }
 
-// ── Stat card ──────────────────────────────────────────────────────────────────
-
-function StatCard({
-  icon, label, value, onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number | undefined;
-  onClick?: () => void;
-}) {
-  return (
-    <Card
-      className={cn(onClick && "cursor-pointer hover:border-primary/50 transition-colors")}
-      onClick={onClick}
-    >
-      <CardContent className="pt-4 pb-4">
-        <div className="flex items-center gap-1.5 text-muted-foreground mb-2 text-xs">
-          {icon}
-          {label}
-        </div>
-        <div className="text-2xl font-bold text-foreground tabular-nums">
-          {value === undefined ? (
-            <span className="text-muted-foreground/40">—</span>
-          ) : (
-            value.toLocaleString()
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Recent artist tile ─────────────────────────────────────────────────────────
-
-function RecentArtistTile({ artist, onClick }: { artist: Artist; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="group text-left">
-      <div className="aspect-square rounded-xl overflow-hidden bg-muted border border-border mb-1.5 ring-1 ring-foreground/5">
-        {artist.image_url ? (
-          <img
-            src={artist.image_url}
-            alt={artist.name}
-            className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-200"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <Music2 className="w-6 h-6 text-muted-foreground/30" />
-          </div>
-        )}
-      </div>
-      <p className="text-xs font-medium text-foreground truncate leading-snug group-hover:text-primary transition-colors">
-        {artist.name}
-      </p>
-    </button>
-  );
-}
-
 // ── Import tab ─────────────────────────────────────────────────────────────────
 
-function formatElapsed(s: number): string {
-  if (s < 60) return `${s}s`;
-  return `${Math.floor(s / 60)}m ${s % 60}s`;
+function formatCompletedAt(iso: string | null): string | null {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    });
+  } catch {
+    return null;
+  }
 }
 
 function ImportTab({
   isActive, phase, scanDone, scanTotal, importDone, importTotal,
-  currentStep, log, summary, error, needsReview, startScan, cancelScan, reset,
-  importReviewItem, skipReviewItem,
+  currentStep, log, summary, completedAt, error, startScan, cancelScan, reset,
 }: {
   isActive: boolean;
   phase: string;
@@ -297,143 +220,235 @@ function ImportTab({
   currentStep: string | null;
   log: import("@/context/ImportContext").ImportLogEntry[];
   summary: import("@/context/ImportContext").ScanSummary | null;
+  completedAt: string | null;
   error: string | null;
-  needsReview: import("@/context/ImportContext").NeedsReviewItem[];
   startScan: () => void;
   cancelScan: () => Promise<void>;
   reset: () => void;
-  importReviewItem: (folder: string, mbid: string) => Promise<void>;
-  skipReviewItem: (folder: string) => void;
 }) {
-  const [summaryVisible, setSummaryVisible] = useState(false);
+  const [syncState, setSyncState] = useState<"idle" | "running" | "done">("idle");
+  const [syncResult, setSyncResult] = useState<{ artists_processed: number; files_linked: number; files_unlinked: number } | null>(null);
+  const [rescanState, setRescanState] = useState<"idle" | "running" | "done">("idle");
+  const [rescanResult, setRescanResult] = useState<{ tracks_updated: number } | null>(null);
 
-  useEffect(() => {
-    if (phase === "done" && summary) {
-      const show = setTimeout(() => setSummaryVisible(true), 0);
-      const hide = setTimeout(() => setSummaryVisible(false), 12000);
-      return () => { clearTimeout(show); clearTimeout(hide); };
+  const handleSyncFiles = async () => {
+    setSyncState("running");
+    setSyncResult(null);
+    try {
+      const result = await syncFileLinks();
+      setSyncResult(result);
+      setSyncState("done");
+    } catch {
+      setSyncState("idle");
     }
-  }, [phase, summary]);
+  };
+
+  const handleRescanTags = async () => {
+    setRescanState("running");
+    setRescanResult(null);
+    try {
+      const result = await rescanTags();
+      setRescanResult(result);
+      setRescanState("done");
+    } catch {
+      setRescanState("idle");
+    }
+  };
 
   return (
-    <div className="max-w-2xl">
-      <p className="text-muted-foreground mb-4">
-        Looks for <strong className="text-foreground">new</strong> artist folders in your music library and imports them into TuneHound.
-        Artists already in your library are skipped.
-      </p>
-      <p className="text-xs text-muted-foreground mb-6">
-        To update an existing artist's albums or fix a match, open the artist's page and use the options there.
-      </p>
+    <div className="max-w-2xl space-y-8">
 
-      {isActive && (
-        <div className="flex items-center gap-3">
+      {/* ── Scan for New Artists ─────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-2 mb-1">
+          <ScanLine className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold text-foreground">Scan for New Artists</h3>
+        </div>
+        <p className="text-sm text-muted-foreground mb-1">
+          Looks for <strong className="text-foreground">new</strong> top-level folders in your music library and imports them into TuneHound. Artists already in your library are skipped.
+        </p>
+        <p className="text-xs text-muted-foreground mb-4">
+          Use this when you've added new artist folders to your music directory.
+        </p>
+
+        {isActive ? (
           <Button variant="outline" onClick={cancelScan}>
             <Square className="w-3.5 h-3.5 fill-current" />
             Stop scan
           </Button>
-        </div>
-      )}
+        ) : (
+          <div className="flex items-center gap-3">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger render={
+                  <Button onClick={startScan}>
+                    <ScanLine className="w-4 h-4" />
+                    {phase === "done" ? "Scan for New Artists" : "Scan Library"}
+                  </Button>
+                } />
+                <TooltipContent side="bottom">
+                  Scans top-level folders in your music directory. Already-imported artists are skipped.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            {phase === "done" && (
+              <Button variant="ghost" onClick={reset}>Clear</Button>
+            )}
+          </div>
+        )}
 
-      {!isActive && (
-        <div className="flex items-center gap-3">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger render={
-                <Button onClick={startScan}>
-                  <ScanLine className="w-4 h-4" />
-                  {phase === "done" ? "Scan for New Artists" : "Scan Library"}
+        {error && <p className="mt-4 text-destructive text-sm">{error}</p>}
+
+        {/* Active scan progress */}
+        {phase === "scanning" && (
+          <div className="mt-6 space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-foreground">
+                {scanTotal === 0
+                  ? "Discovering folders…"
+                  : scanDone < scanTotal
+                    ? `Scanning ${scanDone} / ${scanTotal} folders`
+                    : importTotal > 0
+                      ? `Importing artists…`
+                      : "Finalising…"}
+              </span>
+              {importTotal > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {importDone} / {importTotal} imported
+                </span>
+              )}
+            </div>
+            {scanTotal > 0 && (
+              <Progress value={Math.round((scanDone / scanTotal) * 100)} />
+            )}
+            {currentStep && (
+              <p className="text-xs text-muted-foreground truncate">{currentStep}</p>
+            )}
+            <ImportLog log={log} />
+          </div>
+        )}
+
+        {/* Persistent summary after scan */}
+        {phase === "done" && summary && (
+          <div className="mt-6 rounded-lg border border-border bg-card px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-foreground">Last scan results</span>
+              <div className="flex items-center gap-3">
+                {completedAt && (
+                  <span className="text-xs text-muted-foreground">{formatCompletedAt(completedAt)}</span>
+                )}
+                <Button variant="ghost" size="sm" onClick={reset} className="h-6 px-2 text-xs">
+                  Clear
                 </Button>
-              } />
-              <TooltipContent side="bottom">
-                Scans top-level folders in your music directory. Already-imported artists are skipped.
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {phase === "done" && (
-            <Button variant="ghost" onClick={reset}>
+              </div>
+            </div>
+            <ul className="text-sm space-y-0.5 text-muted-foreground">
+              <li>
+                <span className="text-foreground">{summary.artistsImported}</span> artist{summary.artistsImported !== 1 ? "s" : ""} imported
+                {" · "}
+                <span className="text-foreground">{summary.albumsImported}</span> album{summary.albumsImported !== 1 ? "s" : ""}
+              </li>
+              <li><span className="text-foreground">{summary.filesLinked}</span> file{summary.filesLinked !== 1 ? "s" : ""} linked</li>
+              {summary.needsReviewCount > 0 && (
+                <li className="text-warning">
+                  {summary.needsReviewCount} folder{summary.needsReviewCount !== 1 ? "s" : ""} need review — check the Needs Review tab
+                </li>
+              )}
+            </ul>
+          </div>
+        )}
+
+        {phase === "done" && !summary && (
+          <p className="mt-6 text-muted-foreground text-sm">No new artists found.</p>
+        )}
+      </div>
+
+      <div className="border-t border-border" />
+
+      {/* ── Re-link Files ────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-2 mb-1">
+          <Link className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold text-foreground">Re-link Files</h3>
+        </div>
+        <p className="text-sm text-muted-foreground mb-1">
+          Matches audio files on disk to the tracks TuneHound already knows about. Removes broken links for files that no longer exist.
+        </p>
+        <p className="text-xs text-muted-foreground mb-4">
+          Use this after downloading new albums for existing artists, renaming files, or deleting tracks.
+        </p>
+
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={handleSyncFiles}
+            disabled={syncState === "running"}
+          >
+            <Link className="w-4 h-4" />
+            {syncState === "running" ? "Re-linking…" : "Re-link Files"}
+          </Button>
+          {syncState === "done" && syncResult && (
+            <Button variant="ghost" onClick={() => { setSyncState("idle"); setSyncResult(null); }}>
               Clear
             </Button>
           )}
         </div>
-      )}
 
-      {error && <p className="mt-4 text-destructive text-sm">{error}</p>}
-
-      {/* Needs Review — appears as folders are found during scan, persists after */}
-      {needsReview.length > 0 && (
-        <div className="mt-6 space-y-3">
-          <p className="text-sm font-medium text-foreground">
-            Needs Review
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {needsReview.length} folder{needsReview.length !== 1 ? "s" : ""} below confidence threshold
-            </span>
-          </p>
-          {needsReview.map((item) => (
-            <NeedsReviewCard
-              key={item.folder}
-              item={item}
-              onImport={importReviewItem}
-              onSkip={skipReviewItem}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Active scan + concurrent import progress */}
-      {phase === "scanning" && (
-        <div className="mt-6 space-y-2">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-foreground">
-              {scanTotal === 0
-                ? "Discovering folders…"
-                : scanDone < scanTotal
-                  ? `Scanning ${scanDone} / ${scanTotal} folders`
-                  : importTotal > 0
-                    ? `Importing artists…`
-                    : "Finalising…"}
-            </span>
-            {importTotal > 0 && (
-              <span className="text-xs text-muted-foreground">
-                {importDone} / {importTotal} imported
-              </span>
-            )}
+        {syncState === "done" && syncResult && (
+          <div className="mt-4 rounded-lg border border-border bg-card px-4 py-3">
+            <p className="text-sm font-medium text-foreground mb-1">Re-link complete</p>
+            <ul className="text-sm space-y-0.5 text-muted-foreground">
+              <li><span className="text-foreground">{syncResult.artists_processed}</span> artist{syncResult.artists_processed !== 1 ? "s" : ""} processed</li>
+              <li><span className="text-foreground">{syncResult.files_linked}</span> file{syncResult.files_linked !== 1 ? "s" : ""} linked</li>
+              {syncResult.files_unlinked > 0 && (
+                <li><span className="text-foreground">{syncResult.files_unlinked}</span> broken link{syncResult.files_unlinked !== 1 ? "s" : ""} cleared</li>
+              )}
+            </ul>
           </div>
-          {scanTotal > 0 && (
-            <Progress value={Math.round((scanDone / scanTotal) * 100)} />
-          )}
-          {currentStep && (
-            <p className="text-xs text-muted-foreground truncate">{currentStep}</p>
-          )}
-          <ImportLog log={log} />
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Short-lived summary card after scan completes */}
-      {phase === "done" && summaryVisible && summary && (
-        <div className="mt-6 rounded-lg border border-border bg-card px-4 py-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-foreground">Library scan complete</span>
-            <span className="text-xs text-muted-foreground">{formatElapsed(summary.elapsedSeconds)}</span>
+      <div className="border-t border-border" />
+
+      {/* ── Rescan Tags ──────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-2 mb-1">
+          <Tag className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold text-foreground">Rescan Tags</h3>
+        </div>
+        <p className="text-sm text-muted-foreground mb-1">
+          Re-reads ID3 / Vorbis tags from every linked file on disk and updates TuneHound's tag snapshots.
+        </p>
+        <p className="text-xs text-muted-foreground mb-4">
+          Use this after editing track tags externally (e.g. with beets, MusicBrainz Picard, or a tag editor).
+        </p>
+
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={handleRescanTags}
+            disabled={rescanState === "running"}
+          >
+            <Tag className="w-4 h-4" />
+            {rescanState === "running" ? "Scanning tags…" : "Rescan Tags"}
+          </Button>
+          {rescanState === "done" && rescanResult && (
+            <Button variant="ghost" onClick={() => { setRescanState("idle"); setRescanResult(null); }}>
+              Clear
+            </Button>
+          )}
+        </div>
+
+        {rescanState === "done" && rescanResult && (
+          <div className="mt-4 rounded-lg border border-border bg-card px-4 py-3">
+            <p className="text-sm font-medium text-foreground mb-1">Tag rescan complete</p>
+            <p className="text-sm text-muted-foreground">
+              <span className="text-foreground">{rescanResult.tracks_updated}</span> track{rescanResult.tracks_updated !== 1 ? "s" : ""} updated
+            </p>
           </div>
-          <ul className="text-sm space-y-0.5 text-muted-foreground">
-            <li>
-              <span className="text-foreground">{summary.artistsImported}</span> artist{summary.artistsImported !== 1 ? "s" : ""} imported
-              {" · "}
-              <span className="text-foreground">{summary.albumsImported}</span> album{summary.albumsImported !== 1 ? "s" : ""}
-            </li>
-            <li><span className="text-foreground">{summary.filesLinked}</span> file{summary.filesLinked !== 1 ? "s" : ""} linked</li>
-            {summary.needsReviewCount > 0 && (
-              <li className="text-warning">
-                {summary.needsReviewCount} folder{summary.needsReviewCount !== 1 ? "s" : ""} need review
-              </li>
-            )}
-          </ul>
-        </div>
-      )}
+        )}
+      </div>
 
-      {phase === "done" && !summary && (
-        <p className="mt-6 text-muted-foreground text-sm">No new artists found.</p>
-      )}
     </div>
   );
 }
@@ -444,45 +459,178 @@ function OrphanedTab({ query }: { query: ReturnType<typeof useInfiniteQuery> }) 
   const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } =
     query as ReturnType<typeof useInfiniteQuery<import("@/types").OrphanedFilePage>>;
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Scanning…</p>;
+  const [relinkState, setRelinkState] = useState<"idle" | "running" | "done">("idle");
+  const [relinkResult, setRelinkResult] = useState<{ files_linked: number; files_unlinked: number } | null>(null);
+
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (!isLoading) return;
+    startRef.current = Date.now();
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)),
+      1000,
+    );
+    return () => clearInterval(id);
+  }, [isLoading]);
+
+  const handleRelink = async () => {
+    setRelinkState("running");
+    setRelinkResult(null);
+    try {
+      const result = await syncFileLinks();
+      setRelinkResult(result);
+      setRelinkState("done");
+    } catch {
+      setRelinkState("idle");
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-1.5">
+        <p className="text-sm text-muted-foreground">
+          Walking music library… <span className="tabular-nums">{elapsed}s</span>
+        </p>
+        <p className="text-xs text-muted-foreground/60">
+          This walks every file on disk — can take a while for large libraries.
+        </p>
+      </div>
+    );
+  }
 
   const total = data?.pages[0]?.total ?? 0;
   const files: OrphanedFile[] = data?.pages.flatMap((p) => p.items) ?? [];
 
-  if (files.length === 0) {
-    return <p className="text-muted-foreground text-sm">No orphaned files found.</p>;
+  // Group by top-level folder (first path segment)
+  const groups = files.reduce<Record<string, OrphanedFile[]>>((acc, file) => {
+    const folder = file.relative_path.split("/")[0] ?? "—";
+    if (!acc[folder]) acc[folder] = [];
+    acc[folder].push(file);
+    return acc;
+  }, {});
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      {/* Action bar */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            {total > 0
+              ? <>{total.toLocaleString()} file{total !== 1 ? "s" : ""} on disk not linked to any track.</>
+              : "No orphaned files found."}
+          </p>
+          {total > 0 && (
+            <p className="text-xs text-muted-foreground/70 mt-0.5">
+              Most orphaned files are new albums for existing artists. Try re-linking first.
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRelink}
+            disabled={relinkState === "running"}
+          >
+            <Link className="w-3.5 h-3.5" />
+            {relinkState === "running" ? "Re-linking…" : "Re-link Files"}
+          </Button>
+        </div>
+      </div>
+
+      {relinkState === "done" && relinkResult && (
+        <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
+          <span className="font-medium text-foreground">{relinkResult.files_linked}</span>
+          <span className="text-muted-foreground"> file{relinkResult.files_linked !== 1 ? "s" : ""} linked</span>
+          {relinkResult.files_unlinked > 0 && (
+            <>
+              <span className="text-muted-foreground"> · </span>
+              <span className="font-medium text-foreground">{relinkResult.files_unlinked}</span>
+              <span className="text-muted-foreground"> broken link{relinkResult.files_unlinked !== 1 ? "s" : ""} cleared</span>
+            </>
+          )}
+          {relinkResult.files_linked === 0 && relinkResult.files_unlinked === 0 && (
+            <span className="text-muted-foreground"> — no changes. Remaining files can't be matched to known tracks.</span>
+          )}
+        </div>
+      )}
+
+      {/* Grouped file list */}
+      {Object.entries(groups).map(([folder, folderFiles]) => (
+        <div key={folder}>
+          <div className="flex items-center gap-2 mb-1.5">
+            <p className="text-xs font-semibold text-foreground">{folder}</p>
+            <span className="text-xs text-muted-foreground">
+              {folderFiles.length} file{folderFiles.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="space-y-0.5">
+            {folderFiles.map((file) => (
+              <div key={file.path} className="flex items-center gap-3 px-3 py-1.5 rounded-md hover:bg-muted/50">
+                <FileAudio className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-foreground truncate">{file.filename}</p>
+                  {file.relative_path.split("/").length > 2 && (
+                    <p className="text-xs text-muted-foreground truncate">
+                      {file.relative_path.split("/").slice(1, -1).join("/")}
+                    </p>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
+                  {formatBytes(file.size_bytes)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {hasNextPage && (
+        <Button variant="outline" size="sm" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+          {isFetchingNextPage
+            ? "Loading…"
+            : `Load more (${(total - files.length).toLocaleString()} remaining)`}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ── Needs Review tab ───────────────────────────────────────────────────────────
+
+function NeedsReviewTab({
+  needsReview,
+  importReviewItem,
+  skipReviewItem,
+}: {
+  needsReview: import("@/context/ImportContext").NeedsReviewItem[];
+  importReviewItem: (folder: string, mbid: string) => Promise<void>;
+  skipReviewItem: (folder: string) => void;
+}) {
+  if (needsReview.length === 0) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        No folders need review right now.
+      </p>
+    );
   }
 
   return (
-    <div className="max-w-2xl">
-      <p className="text-xs text-muted-foreground mb-4">
-        {total.toLocaleString()} audio file{total !== 1 ? "s" : ""} on disk not linked to any track in the database.
+    <div className="max-w-2xl space-y-3">
+      <p className="text-sm text-muted-foreground">
+        These folders were found during the last scan but couldn't be matched with enough confidence.
+        Review each one and either import it as the suggested artist or search for the correct match.
       </p>
-      <div className="space-y-1">
-        {files.map((file) => (
-          <div key={file.path} className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50">
-            <FileAudio className="w-4 h-4 text-muted-foreground shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-foreground truncate">{file.filename}</p>
-              <p className="text-xs text-muted-foreground truncate">
-                {file.relative_path.split("/").slice(0, -1).join("/")}
-              </p>
-            </div>
-            <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
-              {formatBytes(file.size_bytes)}
-            </span>
-          </div>
-        ))}
-      </div>
-      {hasNextPage && (
-        <div className="mt-4">
-          <Button variant="outline" size="sm" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
-            {isFetchingNextPage
-              ? "Loading…"
-              : `Load more (${(total - files.length).toLocaleString()} remaining)`}
-          </Button>
-        </div>
-      )}
+      {needsReview.map((item) => (
+        <NeedsReviewCard
+          key={item.folder}
+          item={item}
+          onImport={importReviewItem}
+          onSkip={skipReviewItem}
+        />
+      ))}
     </div>
   );
 }

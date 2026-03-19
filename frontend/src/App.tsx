@@ -88,7 +88,6 @@ export default function App() {
         <Route path="/albums" element={<AlbumsPage />} />
         <Route path="/albums/:id" element={<AlbumDetailPage />} />
         <Route path="/downloads" element={<DownloadsPage />} />
-        <Route path="/library" element={<Navigate to="/" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

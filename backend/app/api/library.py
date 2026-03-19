@@ -495,6 +495,92 @@ async def rename_artist_folder(body: RenameFolderRequest, db: AsyncSession = Dep
     return {"old_name": body.old_name, "new_name": body.new_name, "tracks_updated": len(tracks)}
 
 
+@router.post("/sync-files")
+async def sync_file_links(db: AsyncSession = Depends(get_db)):
+    """
+    Re-run file linking for all known artists:
+    - Link any new audio files found under each artist folder
+    - Update album folder paths and file counts
+    - Clear file_path on tracks whose file no longer exists on disk
+
+    Returns counts of files linked, files unlinked, and artists processed.
+    """
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(
+        select(Artist).where(Artist.folder_name.isnot(None))
+    )
+    artists = result.scalars().all()
+
+    total_linked = 0
+    total_unlinked = 0
+
+    for artist in artists:
+        artist_path = os.path.join(settings.music_library_path, artist.folder_name)
+
+        # Re-link new files
+        if os.path.isdir(artist_path):
+            linked = await scanner.link_existing_files(artist_path, db)
+            total_linked += linked
+
+            # Re-link album folders
+            rg_result = await db.execute(
+                select(ReleaseGroup)
+                .where(ReleaseGroup.artist_id == artist.id)
+                .options(selectinload(ReleaseGroup.tracks))
+            )
+            release_groups = rg_result.scalars().all()
+            await scanner.link_album_folders(artist_path, release_groups, db)
+
+        # Clear broken file links for tracks under this artist
+        track_result = await db.execute(
+            select(Track)
+            .join(ReleaseGroup, Track.release_group_id == ReleaseGroup.id)
+            .where(ReleaseGroup.artist_id == artist.id)
+            .where(Track.file_path.isnot(None))
+        )
+        for track in track_result.scalars().all():
+            if track.file_path and not os.path.isfile(track.file_path):
+                track.file_path = None
+                total_unlinked += 1
+
+    await db.commit()
+    return {
+        "artists_processed": len(artists),
+        "files_linked": total_linked,
+        "files_unlinked": total_unlinked,
+    }
+
+
+@router.post("/rescan-tags")
+async def rescan_tags(db: AsyncSession = Depends(get_db)):
+    """
+    Re-read tags from disk for all tracks that have a linked file.
+    Updates title, artist, album, track number, and art hash snapshots in the DB.
+
+    Returns the number of tracks updated.
+    """
+    result = await db.execute(select(Track).where(Track.file_path.isnot(None)))
+    tracks = result.scalars().all()
+
+    updated = 0
+    for track in tracks:
+        if not track.file_path or not os.path.isfile(track.file_path):
+            continue
+        snap = read_tags(track.file_path)
+        if snap:
+            track.tag_title = snap.title
+            track.tag_artist = snap.artist
+            track.tag_album = snap.album
+            track.tag_track_number = snap.track_number
+            track.tag_art_hash = snap.art_hash
+            track.tags_scanned_at = snap.scanned_at
+            updated += 1
+
+    await db.commit()
+    return {"tracks_updated": updated}
+
+
 @router.delete("/artists", status_code=204)
 async def clear_all_artists(db: AsyncSession = Depends(get_db)):
     """Delete everything library-related: artists, albums, tracks, download jobs, retag jobs."""

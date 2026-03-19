@@ -134,6 +134,15 @@ export const getMissingAlbums = () => request<MissingAlbum[]>("/library/missing"
 export const getOrphanedFiles = (offset = 0, limit = 250) =>
   request<OrphanedFilePage>(`/library/orphaned?offset=${offset}&limit=${limit}`);
 
+export const syncFileLinks = () =>
+  request<{ artists_processed: number; files_linked: number; files_unlinked: number }>(
+    "/library/sync-files",
+    { method: "POST" }
+  );
+
+export const rescanTags = () =>
+  request<{ tracks_updated: number }>("/library/rescan-tags", { method: "POST" });
+
 // ── Artwork ─────────────────────────────────────────────────────────────────────
 
 export const getArtistArtworkOptions = (id: number) =>

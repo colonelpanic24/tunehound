@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="TuneHound", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="TuneHound", version="0.4.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

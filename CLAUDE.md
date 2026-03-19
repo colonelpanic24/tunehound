@@ -13,6 +13,7 @@
 - **Backend**: FastAPI + SQLAlchemy async (aiosqlite), Python 3.11
 - **Frontend**: React + TypeScript (Vite)
 - **Linter**: `ruff` — run as `ruff check <file>` (installed globally, not in the venv)
+- **Tests**: run as `DATA_DIR=/tmp/tunehound-test backend/.venv/bin/python3 -m pytest backend/tests/ -q` from the repo root. `DATA_DIR` must point to a writable directory. Required packages (`pytest`, `pytest-asyncio`, `pytest-mock`, `httpx`) are in the `test` extra: `backend/.venv/bin/pip install -e "backend[test]"`.
 
 ## Task workflow
 
@@ -33,3 +34,4 @@ When the user says "ready for a new release", "cut a release", "make a PR", or s
 6. **Version bump** — increment the version (patch for bug fixes, minor for new features). Do NOT increment the major version without consulting the user first.
 7. **Branch + commit + push** — create a new feature/release branch, commit all changes with a clear message, and push to remote.
 8. **Pull request** — open a PR against main using `gh pr create`.
+9. **CI** — after posting the PR, keep polling `gh run list --branch <branch>` until the build is green. Fix any CI failures before considering the release done.

@@ -19,6 +19,9 @@ TuneHound has limited write ability. It can write new tags and artwork to your e
 - Tag files with full MusicBrainz metadata (recording, release group, and artist MBIDs) and Cover Art Archive artwork
 - MBIDs are written to tags so files can be precisely re-linked after a rescan
 - Browse your library by artist or album with cover art
+- Re-link Files: reconnect audio files to library entries after moving or renaming them on disk
+- Rescan Tags: refresh ID3/Vorbis tag snapshots from the latest file metadata
+- Orphaned file detection: find audio files on disk that aren't linked to any library entry, grouped by artist folder
 - SponsorBlock support, cookies for YouTube Premium, proxy support
 
 
