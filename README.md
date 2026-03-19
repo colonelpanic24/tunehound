@@ -15,7 +15,8 @@ TuneHound has limited write ability. It can write new tags and artwork to your e
 - Download albums or individual tracks from YouTube
 - Real-time download progress via WebSocket
 - Tag files with MusicBrainz metadata and Cover Art Archive artwork
-- Browse your library by artist or album with cover art
+- Browse your library by artist or album with cover art, sorted by name, date, or availability
+- Color-coded availability badges show how much of each artist or album you have on disk
 - SponsorBlock support, cookies for YouTube Premium, proxy support
 
 
@@ -71,7 +72,7 @@ All other settings are configured via the **Settings** page in the UI and stored
 
 | Setting | Description |
 |---------|-------------|
-| Audio format | Output codec: `opus`, `vorbis`, `mp3`, `flac`, `m4a` |
+| Audio format | Output codec: `mp3` (default), `opus`, `vorbis`, `flac`, `m4a` |
 | yt-dlp format | Format selector passed to yt-dlp (presets or custom string) |
 | Delay between tracks | Random delay range (seconds) between downloads to avoid rate limits |
 | Max retries | Retry attempts per failed track |
