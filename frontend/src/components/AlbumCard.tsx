@@ -139,6 +139,7 @@ export default function AlbumCard({ album, artistName, onDisk = false, fileCount
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  aria-label={album.watched ? "Unwatch" : "Watch"}
                   onClick={() => watchMutation.mutate()}
                   disabled={watchMutation.isPending}
                 />

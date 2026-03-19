@@ -156,6 +156,9 @@ async def run_download_job(
                     track.disc_number,
                     (release_group.first_release_date or "")[:4] or None,
                     cover_bytes,
+                    track.mbid,
+                    release_group.mbid,
+                    artist.mbid,
                 )
                 track.file_path = output_path
                 track_job.status = "completed"

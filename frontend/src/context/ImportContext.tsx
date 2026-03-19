@@ -146,6 +146,23 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, []);
 
+  // Poll backend every 8 s while scanning so a missed scan_done WS message
+  // doesn't leave the UI permanently stuck in scanning phase.
+  useEffect(() => {
+    if (state.phase !== "scanning") return;
+    const id = setInterval(() => {
+      fetch(`${BASE}/library/scan-job`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((raw) => {
+          if (raw && (raw as Record<string, unknown>).phase !== "scanning") {
+            setState(mapBackendState(raw as Record<string, unknown>));
+          }
+        })
+        .catch(() => {});
+    }, 8000);
+    return () => clearInterval(id);
+  }, [state.phase]);
+
   // WebSocket-driven updates
   useWebSocketMessage((msg: WSMessage) => {
     switch (msg.type) {
@@ -181,7 +198,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           ...s,
           log: [...s.log, mapLogEntry(msg.entry)],
         }));
-        // Optimistically update stats counter when an artist is successfully imported
+        // Optimistically bump artists/albums and refetch full stats (tracks + files) on import
         if (msg.entry.type === "imported") {
           queryClient.setQueryData<Stats>(["stats"], (old) =>
             old
@@ -192,6 +209,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
                 }
               : old
           );
+          queryClient.invalidateQueries({ queryKey: ["stats"] });
         }
         break;
 
@@ -209,6 +227,8 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           },
         }));
         queryClient.invalidateQueries({ queryKey: ["artists"] });
+        queryClient.invalidateQueries({ queryKey: ["albums"] });
+        queryClient.invalidateQueries({ queryKey: ["disk-status"] });
         queryClient.invalidateQueries({ queryKey: ["stats"] });
         break;
 
@@ -217,8 +237,10 @@ export function ImportProvider({ children }: { children: ReactNode }) {
         break;
 
       case "artist_ready":
-        // Refresh the artists list so the new artist appears live
+        // Refresh artists, albums, and disk-status so availability updates live
         queryClient.invalidateQueries({ queryKey: ["artists"] });
+        queryClient.invalidateQueries({ queryKey: ["albums"] });
+        queryClient.invalidateQueries({ queryKey: ["disk-status"] });
         break;
     }
   });
@@ -244,6 +266,8 @@ export function ImportProvider({ children }: { children: ReactNode }) {
   const clearAll = useCallback(async () => {
     await fetch(`${BASE}/library/artists`, { method: "DELETE" });
     queryClient.invalidateQueries({ queryKey: ["artists"] });
+    queryClient.invalidateQueries({ queryKey: ["albums"] });
+    queryClient.invalidateQueries({ queryKey: ["disk-status"] });
     queryClient.invalidateQueries({ queryKey: ["stats"] });
     queryClient.invalidateQueries({ queryKey: ["library-missing"] });
     queryClient.invalidateQueries({ queryKey: ["library-missing-count"] });
@@ -300,6 +324,8 @@ export function ImportProvider({ children }: { children: ReactNode }) {
               : old
           );
           queryClient.invalidateQueries({ queryKey: ["artists"] });
+          queryClient.invalidateQueries({ queryKey: ["albums"] });
+          queryClient.invalidateQueries({ queryKey: ["disk-status"] });
         }
       }
     } catch {} // eslint-disable-line no-empty

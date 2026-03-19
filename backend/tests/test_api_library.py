@@ -1,11 +1,86 @@
 """Tests for /api/library endpoints."""
-import json
-import os
-import tempfile
-
 import pytest
 
 from tests.conftest import seed_artist, seed_release_group, seed_track
+
+# ── POST /api/library/rename-folder ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_rename_folder_not_found(client, tmp_path, mocker):
+    mocker.patch("app.api.library.settings.music_library_path", str(tmp_path))
+    mocker.patch("app.services.library_watcher.stop_library_watcher")
+    mocker.patch("app.services.library_watcher.start_library_watcher")
+    r = await client.post(
+        "/api/library/rename-folder",
+        json={"old_name": "Nonexistent", "new_name": "Something"},
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_rename_folder_destination_exists(client, tmp_path, mocker):
+    mocker.patch("app.api.library.settings.music_library_path", str(tmp_path))
+    mocker.patch("app.services.library_watcher.stop_library_watcher")
+    mocker.patch("app.services.library_watcher.start_library_watcher")
+    (tmp_path / "OldName").mkdir()
+    (tmp_path / "NewName").mkdir()
+    r = await client.post(
+        "/api/library/rename-folder",
+        json={"old_name": "OldName", "new_name": "NewName"},
+    )
+    assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_rename_folder_renames_on_disk(client, db_session, tmp_path, mocker):
+    mocker.patch("app.api.library.settings.music_library_path", str(tmp_path))
+    mocker.patch("app.services.library_watcher.stop_library_watcher")
+    mocker.patch("app.services.library_watcher.start_library_watcher")
+
+    old_dir = tmp_path / "AC DC"
+    old_dir.mkdir()
+
+    r = await client.post(
+        "/api/library/rename-folder",
+        json={"old_name": "AC DC", "new_name": "AC_DC"},
+    )
+    assert r.status_code == 200
+    assert not (tmp_path / "AC DC").exists()
+    assert (tmp_path / "AC_DC").exists()
+
+
+@pytest.mark.asyncio
+async def test_rename_folder_updates_artist_and_tracks(client, db_session, tmp_path, mocker):
+    mocker.patch("app.api.library.settings.music_library_path", str(tmp_path))
+    mocker.patch("app.services.library_watcher.stop_library_watcher")
+    mocker.patch("app.services.library_watcher.start_library_watcher")
+
+    old_dir = tmp_path / "Old Name"
+    album_dir = old_dir / "Album"
+    album_dir.mkdir(parents=True)
+    track_file = album_dir / "01 - Song.mp3"
+    track_file.write_bytes(b"\x00" * 10)
+
+    artist = await seed_artist(db_session, folder_name="Old Name")
+    rg = await seed_release_group(db_session, artist_id=artist.id)
+    track = await seed_track(
+        db_session, release_group_id=rg.id, file_path=str(track_file)
+    )
+
+    r = await client.post(
+        "/api/library/rename-folder",
+        json={"old_name": "Old Name", "new_name": "New Name"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["tracks_updated"] == 1
+
+    await db_session.refresh(artist)
+    await db_session.refresh(track)
+    assert artist.folder_name == "New Name"
+    assert "New Name" in track.file_path
+    assert "Old Name" not in track.file_path
 
 
 @pytest.mark.asyncio

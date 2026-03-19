@@ -12,9 +12,12 @@ TuneHound has limited write ability. It can write new tags and artwork to your e
 
 - Subscribe to artists and track their full discography (albums, EPs, singles)
 - Match existing local folders to MusicBrainz releases on import
+- Article-aware MusicBrainz scoring ("The Watchmen" won't match "The Beatles")
+- Prompt to rename artist folders to their canonical form during import
 - Download albums or individual tracks from YouTube
 - Real-time download progress via WebSocket
-- Tag files with MusicBrainz metadata and Cover Art Archive artwork
+- Tag files with full MusicBrainz metadata (recording, release group, and artist MBIDs) and Cover Art Archive artwork
+- MBIDs are written to tags so files can be precisely re-linked after a rescan
 - Browse your library by artist or album with cover art
 - SponsorBlock support, cookies for YouTube Premium, proxy support
 

@@ -137,7 +137,6 @@ def _write_tags(file_path: str, meta: dict, rg: ReleaseGroup, track: Track) -> N
     if rg.first_release_date:
         year = rg.first_release_date[:4]
 
-    # tag_file signature: tag_file(file_path, title, artist, album, track_number, disc_number, year, cover_bytes)
     tag_file(
         file_path=file_path,
         title=meta.get("title") or track.title,
@@ -147,6 +146,9 @@ def _write_tags(file_path: str, meta: dict, rg: ReleaseGroup, track: Track) -> N
         disc_number=track.disc_number or 1,
         year=year,
         cover_bytes=meta.get("cover_art"),
+        recording_mbid=track.mbid,
+        release_group_mbid=rg.mbid,
+        artist_mbid=rg.artist.mbid if rg.artist else None,
     )
 
 
