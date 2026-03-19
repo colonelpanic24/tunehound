@@ -44,6 +44,7 @@ export interface ImportState {
   summary: ScanSummary | null;
   error: string | null;
   needsReview: NeedsReviewItem[];
+  completedAt: string | null;
 }
 
 interface ImportContextValue {
@@ -67,6 +68,7 @@ const INITIAL: ImportState = {
   summary: null,
   error: null,
   needsReview: [],
+  completedAt: null,
 };
 
 // Convert snake_case log entry from API to camelCase
@@ -100,6 +102,7 @@ function mapBackendState(raw: Record<string, unknown>): ImportState {
     log: rawLog.map(mapLogEntry),
     needsReview: rawNR,
     error: (raw.error as string | null) ?? null,
+    completedAt: (raw.completed_at as string | null) ?? null,
     summary: rawSummary
       ? {
           artistsImported: rawSummary.artists_imported,
@@ -218,6 +221,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           ...s,
           phase: "done",
           currentStep: null,
+          completedAt: (msg.completed_at as string | null) ?? new Date().toISOString(),
           summary: {
             artistsImported: msg.summary.artists_imported,
             albumsImported: msg.summary.albums_imported,
@@ -259,6 +263,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       needsReview: [],
       summary: null,
       error: null,
+      completedAt: null,
     });
     await fetch(`${BASE}/library/scan-job`, { method: "POST" });
   }, []);

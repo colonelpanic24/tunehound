@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Music2, Download, Disc3, Loader2, Settings, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { HardDrive, Music2, Download, Disc3, Loader2, Settings, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 
 
@@ -58,8 +58,8 @@ export default function Layout({ children }: Props) {
 
         {/* Nav items */}
         <div className="flex flex-col gap-0.5 px-2 flex-1">
-          <NavItem to="/" icon={<LayoutDashboard className="w-5 h-5" />} end collapsed={collapsed}>
-            Dashboard
+          <NavItem to="/" icon={<HardDrive className="w-5 h-5" />} end collapsed={collapsed}>
+            Library
           </NavItem>
           <NavItem
             to="/artists"

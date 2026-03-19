@@ -16,6 +16,7 @@ import os
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 Broadcast = Callable[[dict], Coroutine[Any, Any, None]]
@@ -70,6 +71,7 @@ class ScanJobState:
     summary: ScanSummary | None = None
     error: str | None = None
     needs_review: list[NeedsReviewItem] = field(default_factory=list)
+    completed_at: str | None = None  # ISO-8601 UTC timestamp when scan finished
 
     def to_dict(self) -> dict:
         return {
@@ -83,6 +85,7 @@ class ScanJobState:
             "summary": self.summary.to_dict() if self.summary else None,
             "error": self.error,
             "needs_review": [i.to_dict() for i in self.needs_review],
+            "completed_at": self.completed_at,
         }
 
 
@@ -155,6 +158,7 @@ def _load_state() -> "ScanJobState":
             summary=summary,
             error=raw.get("error"),
             needs_review=needs_review,
+            completed_at=raw.get("completed_at"),
         )
     except Exception:
         return ScanJobState()
@@ -660,8 +664,9 @@ class ScanJobManager:
             state.summary = summary
             state.phase = "done"
             state.current_step = None
+            state.completed_at = datetime.now(UTC).isoformat()
             _save_state(state)
-            await self._emit({"type": "scan_done", "summary": summary.to_dict()})
+            await self._emit({"type": "scan_done", "summary": summary.to_dict(), "completed_at": state.completed_at})
 
         except asyncio.CancelledError:
             state.phase = "idle"
