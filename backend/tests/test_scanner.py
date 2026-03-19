@@ -2,9 +2,12 @@
 import os
 
 import pytest
-import pytest_asyncio
 
-from app.services.scanner import link_album_folders, link_existing_files, scan_music_directory_stream
+from app.services.scanner import (
+    link_album_folders,
+    link_existing_files,
+    scan_music_directory_stream,
+)
 
 
 @pytest.mark.asyncio

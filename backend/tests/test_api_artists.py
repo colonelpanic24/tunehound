@@ -110,7 +110,7 @@ async def test_get_artist_disk_status_uses_stored_file_count(client, db_session,
     (album_dir / "02.mp3").write_bytes(b"\x00")
 
     artist = await seed_artist(db_session, folder_name="My Artist")
-    rg = await seed_release_group(
+    await seed_release_group(
         db_session, artist_id=artist.id, title="Great Album",
         folder_path=str(album_dir), file_count=2
     )
@@ -134,7 +134,7 @@ async def test_get_artist_disk_status_clears_stale_folder(client, db_session, mo
     # Note: no album subfolder — the stored path is stale
 
     artist = await seed_artist(db_session, folder_name="My Artist")
-    rg = await seed_release_group(
+    await seed_release_group(
         db_session, artist_id=artist.id, title="Deleted Album",
         folder_path=str(artist_dir / "Deleted Album"), file_count=5
     )
