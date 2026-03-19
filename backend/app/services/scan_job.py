@@ -10,8 +10,9 @@ page load / reconnect.
 import asyncio
 import os
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 Broadcast = Callable[[dict], Coroutine[Any, Any, None]]
 

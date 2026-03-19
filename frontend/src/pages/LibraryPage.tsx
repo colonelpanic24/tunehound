@@ -142,9 +142,9 @@ function ImportTab({
 
   useEffect(() => {
     if (phase === "done" && summary) {
-      setSummaryVisible(true);
-      const t = setTimeout(() => setSummaryVisible(false), 12000);
-      return () => clearTimeout(t);
+      const show = setTimeout(() => setSummaryVisible(true), 0);
+      const hide = setTimeout(() => setSummaryVisible(false), 12000);
+      return () => { clearTimeout(show); clearTimeout(hide); };
     }
   }, [phase, summary]);
 

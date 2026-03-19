@@ -16,10 +16,9 @@ from app.services import musicbrainz as mb
 from app.services import scanner
 from app.services.coverart import get_cover_art_url
 from app.services.image_cache import cache_image
+from app.services.scan_job import scan_job_manager
 from app.services.tag_reader import read_tags
 from app.services.tagger import compute_art_hash_from_cover_file
-
-from app.services.scan_job import scan_job_manager
 
 router = APIRouter(prefix="/library", tags=["library"])
 
