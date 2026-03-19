@@ -49,6 +49,7 @@ export interface ImportState {
 interface ImportContextValue {
   state: ImportState;
   startScan: () => Promise<void>;
+  cancelScan: () => Promise<void>;
   clearAll: () => Promise<void>;
   reset: () => void;
   importReviewItem: (folder: string, mbid: string) => Promise<void>;
@@ -251,6 +252,11 @@ export function ImportProvider({ children }: { children: ReactNode }) {
     setState(INITIAL);
   }, [queryClient]);
 
+  const cancelScan = useCallback(async () => {
+    await fetch(`${BASE}/library/scan-job`, { method: "DELETE" });
+    setState((s) => ({ ...s, phase: "idle", currentStep: null }));
+  }, []);
+
   const reset = useCallback(() => setState(INITIAL), []);
 
   const skipReviewItem = useCallback((folder: string) => {
@@ -301,7 +307,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
 
   return (
     <ImportContext.Provider
-      value={{ state, startScan, clearAll, reset, importReviewItem, skipReviewItem }}
+      value={{ state, startScan, cancelScan, clearAll, reset, importReviewItem, skipReviewItem }}
     >
       {children}
     </ImportContext.Provider>

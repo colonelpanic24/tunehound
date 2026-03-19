@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
-  Music2, Disc3, ListMusic, HardDrive, Download, Plus, ScanLine, FileAudio, Trash2,
+  Music2, Disc3, ListMusic, HardDrive, Download, Plus, ScanLine, FileAudio, Trash2, Square,
 } from "lucide-react";
 import { getStats, listArtists, getOrphanedFiles } from "@/api/client";
 import AddArtistModal from "@/components/AddArtistModal";
@@ -38,7 +38,7 @@ export default function DashboardPage() {
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: getStats, staleTime: 30_000 });
   const { data: artists = [] } = useQuery({ queryKey: ["artists"], queryFn: listArtists });
 
-  const { state, startScan, clearAll, reset, importReviewItem, skipReviewItem } = useImport();
+  const { state, startScan, cancelScan, clearAll, reset, importReviewItem, skipReviewItem } = useImport();
   const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, summary, error, needsReview } = state;
   const importActive = phase === "scanning";
 
@@ -194,6 +194,7 @@ export default function DashboardPage() {
               error={error}
               needsReview={needsReview}
               startScan={startScan}
+              cancelScan={cancelScan}
               clearAll={clearAll}
               reset={reset}
               importReviewItem={importReviewItem}
@@ -282,7 +283,7 @@ function formatElapsed(s: number): string {
 
 function ImportTab({
   isActive, phase, scanDone, scanTotal, importDone, importTotal,
-  currentStep, log, summary, error, needsReview, startScan, clearAll, reset,
+  currentStep, log, summary, error, needsReview, startScan, cancelScan, clearAll, reset,
   importReviewItem, skipReviewItem,
 }: {
   isActive: boolean;
@@ -297,6 +298,7 @@ function ImportTab({
   error: string | null;
   needsReview: import("@/context/ImportContext").NeedsReviewItem[];
   startScan: () => void;
+  cancelScan: () => Promise<void>;
   clearAll: () => Promise<void>;
   reset: () => void;
   importReviewItem: (folder: string, mbid: string) => Promise<void>;
@@ -326,6 +328,15 @@ function ImportTab({
       <p className="text-muted-foreground mb-6">
         Scan your music directory to discover and import artists automatically.
       </p>
+
+      {isActive && (
+        <div className="flex items-center gap-3">
+          <Button variant="outline" onClick={cancelScan}>
+            <Square className="w-3.5 h-3.5 fill-current" />
+            Stop scan
+          </Button>
+        </div>
+      )}
 
       {!isActive && (
         <div className="flex items-center gap-3">
@@ -407,11 +418,11 @@ function ImportTab({
             <span className="text-foreground">
               {scanTotal === 0
                 ? "Discovering folders…"
-                : `Scanning — ${scanDone} / ${scanTotal}`}
+                : `Scanning ${scanDone} / ${scanTotal} folders`}
             </span>
-            {importDone > 0 && (
+            {importTotal > 0 && (
               <span className="text-xs text-muted-foreground">
-                {importDone}{importTotal > 0 ? ` / ${importTotal}` : ""} imported
+                {importDone} / {importTotal} artists imported
               </span>
             )}
           </div>
