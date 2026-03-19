@@ -248,4 +248,25 @@ export type WSMessage =
       type: "retag_complete";
       payload: { job_id: number; status: string };
     }
-  | { type: "artist_ready"; payload: Artist };
+  | { type: "artist_ready"; payload: Artist }
+  | { type: "scan_started"; total: number }
+  | {
+      type: "scan_progress";
+      scan_done: number;
+      scan_total: number;
+      import_done: number;
+      import_total: number;
+      current_step: string | null;
+    }
+  | { type: "scan_log"; entry: { type: string; label: string; album_count?: number } }
+  | {
+      type: "scan_done";
+      summary: {
+        artists_imported: number;
+        albums_imported: number;
+        files_linked: number;
+        needs_review_count: number;
+        elapsed_seconds: number;
+      };
+    }
+  | { type: "scan_error"; error: string };

@@ -1,19 +1,21 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { LayoutDashboard, Music2, Download, Disc3, Loader2, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useImport } from "@/context/ImportContext";
 import { getStats } from "@/api/client";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Props {
   children: ReactNode;
 }
 
 export default function Layout({ children }: Props) {
+  const navigate = useNavigate();
   const { state } = useImport();
   const { phase, scanDone, scanTotal, importDone, importTotal } = state;
-  const isActive = phase === "scanning" || phase === "importing" || phase === "linking";
+  const isActive = phase === "scanning";
 
   const { data: stats } = useQuery({
     queryKey: ["stats"],
@@ -69,19 +71,37 @@ export default function Layout({ children }: Props) {
 
 
         {isActive && (
-          <NavLink
-            to="/"
-            className="mx-3 mb-4 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition-colors"
+          <div
+            onClick={() => navigate("/")}
+            className="mx-3 mb-4 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition-colors cursor-pointer"
           >
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="w-3 h-3 animate-spin text-primary shrink-0" />
-              <span className="truncate">
-                {phase === "scanning" && `Scanning ${scanDone}/${scanTotal}`}
-                {phase === "importing" && `Importing ${importDone}/${importTotal}`}
-                {phase === "linking" && "Linking files…"}
-              </span>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-0.5">
+              <Tooltip>
+                <TooltipTrigger className="cursor-help shrink-0">
+                  <Loader2 className="w-3 h-3 animate-spin text-primary" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-56">
+                  Searching each music folder by name on MusicBrainz to find the matching artist.
+                  MusicBrainz enforces a 1 request/second rate limit, so this takes roughly 1 second per folder.
+                </TooltipContent>
+              </Tooltip>
+              <span>Scanning {scanDone} / {scanTotal} folders</span>
             </div>
-          </NavLink>
+            {importTotal > 0 && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Tooltip>
+                  <TooltipTrigger className="w-3 h-3 flex items-center justify-center shrink-0 cursor-help">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="max-w-56">
+                    Fetching each artist's full profile from MusicBrainz: biography, discography, album artwork,
+                    and track listings. Each artist requires several API calls and takes 30–90 seconds to complete.
+                  </TooltipContent>
+                </Tooltip>
+                <span>Importing {importDone} / {importTotal} artists</span>
+              </div>
+            )}
+          </div>
         )}
       </nav>
 

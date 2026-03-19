@@ -16,12 +16,41 @@ from app.services import musicbrainz as mb
 from app.services import scanner
 from app.services.coverart import get_cover_art_url
 from app.services.image_cache import cache_image
+from app.services.scan_job import scan_job_manager
 from app.services.tag_reader import read_tags
 from app.services.tagger import compute_art_hash_from_cover_file
 
 router = APIRouter(prefix="/library", tags=["library"])
 
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+# ── Backend-driven scan job endpoints ──────────────────────────────────────────
+
+
+@router.post("/scan-job", status_code=202)
+async def start_scan_job():
+    """Start a background scan+import job.  Idempotent if already running."""
+    await scan_job_manager.start()
+    return {"started": True}
+
+
+@router.get("/scan-job")
+async def get_scan_job():
+    """Return the current scan job state (for page-load hydration)."""
+    return scan_job_manager.get_state()
+
+
+@router.delete("/scan-job", status_code=204)
+async def cancel_scan_job():
+    """Cancel a running scan job."""
+    await scan_job_manager.cancel()
+
+
+@router.delete("/scan-job/review-item", status_code=204)
+async def remove_review_item(folder: str):
+    """Remove a needs-review item from the scan job state (after import or skip)."""
+    scan_job_manager.remove_review_item(folder)
 
 
 def _sse(event: dict) -> str:
