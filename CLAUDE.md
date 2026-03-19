@@ -4,7 +4,7 @@
 
 - Always use `python3`, never `python`.
 - The backend virtualenv is at `backend/.venv/`. Run Python as `backend/.venv/bin/python3`.
-- The DB is at `/home/stefan/tunehound-data/tunehound.db` (SQLite).
+- The DB is at `~/tunehound-data/tunehound.db` (SQLite) in dev; path is controlled by `DATA_DIR`.
 - Music library is mounted at `/mnt/media/music` (configurable via `MUSIC_LIBRARY_PATH`).
 - The app runs in Docker in production; the `.env` file in `backend/` points at the local dev paths above.
 
