@@ -261,6 +261,7 @@ export type WSMessage =
   | { type: "scan_log"; entry: { type: string; label: string; album_count?: number } }
   | {
       type: "scan_done";
+      completed_at: string | null;
       summary: {
         artists_imported: number;
         albums_imported: number;

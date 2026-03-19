@@ -263,6 +263,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       needsReview: [],
       summary: null,
       error: null,
+      completedAt: null,
     });
     await fetch(`${BASE}/library/scan-job`, { method: "POST" });
   }, []);
