@@ -153,8 +153,12 @@ function ImportTab({
 
   return (
     <div className="max-w-2xl">
-      <p className="text-muted-foreground mb-6">
-        Scan your music directory to discover and import artists automatically.
+      <p className="text-muted-foreground mb-4">
+        Looks for <strong className="text-foreground">new</strong> artist folders in your music library and imports them into TuneHound.
+        Artists already in your library are skipped.
+      </p>
+      <p className="text-xs text-muted-foreground mb-6">
+        To update an existing artist's albums or fix a match, open the artist's page and use the options there.
       </p>
 
       {isActive && (
@@ -168,10 +172,19 @@ function ImportTab({
 
       {!isActive && (
         <div className="flex items-center gap-3">
-          <Button onClick={startScan}>
-            <ScanLine className="w-4 h-4" />
-            {phase === "done" ? "Scan Again" : "Scan Library"}
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger render={
+                <Button onClick={startScan}>
+                  <ScanLine className="w-4 h-4" />
+                  {phase === "done" ? "Scan for New Artists" : "Scan Library"}
+                </Button>
+              } />
+              <TooltipContent side="bottom">
+                Scans top-level folders in your music directory. Already-imported artists are skipped.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {phase === "done" && (
             <Button variant="ghost" onClick={reset}>
               Clear
