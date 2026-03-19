@@ -30,18 +30,29 @@ def _extract_track_info(path: str) -> dict | None:
     if ext not in AUDIO_EXTS:
         return None
 
-    # Match "01 - Title.ext" or "01-02 - Title.ext" (disc-track)
+    # Primary: "01 - Title.ext" or "01-02 - Title.ext" (disc-track)
     m = re.match(r"^(\d{2})(?:-(\d{2}))? - (.+)\.[^.]+$", filename)
-    if not m:
-        return None
+    if m:
+        return {
+            "path": path,
+            "ext": ext,
+            "track_number": int(m.group(2) or m.group(1)),
+            "disc_number": int(m.group(1)) if m.group(2) else 1,
+            "title_guess": m.group(3),
+        }
 
-    return {
-        "path": path,
-        "ext": ext,
-        "track_number": int(m.group(2) or m.group(1)),
-        "disc_number": int(m.group(1)) if m.group(2) else 1,
-        "title_guess": m.group(3),
-    }
+    # Fallback: "01 Title.ext" (no dash separator)
+    m = re.match(r"^(\d{1,2})\s+(.+)\.[^.]+$", filename)
+    if m:
+        return {
+            "path": path,
+            "ext": ext,
+            "track_number": int(m.group(1)),
+            "disc_number": 1,
+            "title_guess": m.group(2),
+        }
+
+    return None
 
 
 class _MusicEventHandler(FileSystemEventHandler):

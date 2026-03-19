@@ -5,9 +5,13 @@ A single ScanJobManager instance runs the entire scan + import pipeline as an
 asyncio background task.  The frontend connects via WebSocket to receive live
 progress updates, and can also GET /api/library/scan-job to hydrate state on
 page load / reconnect.
+
+State is persisted to {data_dir}/scan_job_state.json after every meaningful
+mutation so that the log and needs_review list survive backend restarts.
 """
 
 import asyncio
+import json
 import os
 import time
 from collections.abc import Callable, Coroutine
@@ -82,12 +86,95 @@ class ScanJobState:
         }
 
 
+# ── Persistence helpers ────────────────────────────────────────────────────────
+
+
+def _state_file_path() -> str:
+    from app.config import settings
+    return os.path.join(settings.data_dir, "scan_job_state.json")
+
+
+def _save_state(state: "ScanJobState") -> None:
+    """Write state snapshot to disk. Silently ignores errors."""
+    try:
+        path = _state_file_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(state.to_dict(), f)
+    except Exception:
+        pass
+
+
+def _load_state() -> "ScanJobState":
+    """Load persisted state from disk, returning a fresh idle state on any error."""
+    try:
+        path = _state_file_path()
+        if not os.path.isfile(path):
+            return ScanJobState()
+        with open(path) as f:
+            raw = json.load(f)
+
+        log = [
+            ScanLogEntry(
+                type=e["type"],
+                label=e["label"],
+                album_count=e.get("album_count"),
+            )
+            for e in raw.get("log", [])
+        ]
+        needs_review = [
+            NeedsReviewItem(folder=i["folder"], candidates=i["candidates"])
+            for i in raw.get("needs_review", [])
+        ]
+        raw_summary = raw.get("summary")
+        summary = (
+            ScanSummary(
+                artists_imported=raw_summary["artists_imported"],
+                albums_imported=raw_summary["albums_imported"],
+                files_linked=raw_summary["files_linked"],
+                needs_review_count=raw_summary["needs_review_count"],
+                elapsed_seconds=raw_summary["elapsed_seconds"],
+            )
+            if raw_summary
+            else None
+        )
+
+        # A scan that was "scanning" when the process died is now stale — mark done
+        phase = raw.get("phase", "idle")
+        if phase == "scanning":
+            phase = "done"
+
+        return ScanJobState(
+            phase=phase,
+            scan_done=raw.get("scan_done", 0),
+            scan_total=raw.get("scan_total", 0),
+            import_done=raw.get("import_done", 0),
+            import_total=raw.get("import_total", 0),
+            current_step=None,
+            log=log,
+            summary=summary,
+            error=raw.get("error"),
+            needs_review=needs_review,
+        )
+    except Exception:
+        return ScanJobState()
+
+
+def _clear_state_file() -> None:
+    try:
+        path = _state_file_path()
+        if os.path.isfile(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
 # ── Manager ────────────────────────────────────────────────────────────────────
 
 
 class ScanJobManager:
     def __init__(self) -> None:
-        self._state = ScanJobState()
+        self._state = _load_state()
         self._task: asyncio.Task | None = None
         self._abort = asyncio.Event()
         self._broadcast: Broadcast | None = None
@@ -108,6 +195,7 @@ class ScanJobManager:
             return
         self._abort.clear()
         self._state = ScanJobState(phase="scanning")
+        _clear_state_file()
         self._task = asyncio.create_task(self._run())
 
     async def cancel(self) -> None:
@@ -120,11 +208,13 @@ class ScanJobManager:
                 pass
         self._state.phase = "idle"
         self._state.current_step = None
+        _save_state(self._state)
 
     def remove_review_item(self, folder: str) -> None:
         self._state.needs_review = [
             i for i in self._state.needs_review if i.folder != folder
         ]
+        _save_state(self._state)
 
     async def _emit(self, msg: dict) -> None:
         if self._broadcast:
@@ -219,6 +309,7 @@ class ScanJobManager:
                         state.import_done += 1
                         log_entry = ScanLogEntry(type="skipped", label=mbid)
                         state.log.append(log_entry)
+                        _save_state(state)
                         await self._emit(
                             {"type": "scan_progress", **self._progress_snapshot()}
                         )
@@ -455,6 +546,7 @@ class ScanJobManager:
                         album_count=album_count,
                     )
                     state.log.append(log_entry)
+                    _save_state(state)
                     await self._emit(
                         {"type": "scan_progress", **self._progress_snapshot()}
                     )
@@ -476,6 +568,7 @@ class ScanJobManager:
                 state.current_step = None
                 log_entry = ScanLogEntry(type="error", label=f"{mbid}: {exc}")
                 state.log.append(log_entry)
+                _save_state(state)
                 await self._emit(
                     {"type": "scan_progress", **self._progress_snapshot()}
                 )
@@ -538,6 +631,7 @@ class ScanJobManager:
                             type="needs_review", label=folder
                         )
                         state.log.append(log_entry)
+                        _save_state(state)
                         await self._emit(
                             {"type": "scan_progress", **self._progress_snapshot()}
                         )
@@ -566,6 +660,7 @@ class ScanJobManager:
             state.summary = summary
             state.phase = "done"
             state.current_step = None
+            _save_state(state)
             await self._emit({"type": "scan_done", "summary": summary.to_dict()})
 
         except asyncio.CancelledError:

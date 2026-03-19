@@ -474,7 +474,7 @@ export default function ArtistDetailPage() {
           onClose={() => setMatchDialogOpen(false)}
           initialQuery={artist.name}
           title={`Reassign "${artist.name}" to a different artist`}
-          onConfirm={(mbid) => rematchMutation.mutate(mbid)}
+          onConfirm={(mbid, _name) => rematchMutation.mutate(mbid)}
           confirmLabel="Reassign"
         />
       )}

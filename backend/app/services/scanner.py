@@ -5,9 +5,83 @@ and links found audio files to Track records in the database.
 
 import asyncio
 import os
+import re
 from collections.abc import AsyncGenerator
+from difflib import SequenceMatcher
 
 from app.services.library_watcher import _extract_track_info
+
+
+def _normalize_folder_name(name: str) -> str:
+    """
+    Normalise a music library folder name before passing it to MusicBrainz.
+
+    Handles several real-world naming conventions that confuse MB search:
+    - Sort-name format  "Artist, The" → "The Artist"  (also A / An)
+    - Trailing underscore used as punctuation substitute  "Bare Jr_" → "Bare Jr"
+    - Internal underscores as character substitutes  "AC_DC" → "AC DC"
+    - Common format tags  "[FLAC]"  "(V0)"  "[320kbps]"  → stripped
+    """
+    # Strip bracketed format tags, e.g. "[FLAC]", "(V0)", "[320kbps]"
+    name = re.sub(r"[\[\(][^\]\)]{1,20}[\]\)]", "", name).strip()
+
+    # Replace all underscores with spaces (covers "Bare Jr_" and "AC_DC")
+    name = name.replace("_", " ").strip()
+
+    # Flip sort-name format: "Artist, The" → "The Artist"
+    name = re.sub(r"^(.+),\s+(The|A|An)$", r"\2 \1", name, flags=re.IGNORECASE)
+
+    # Collapse any double spaces introduced above
+    name = re.sub(r"\s+", " ", name).strip()
+
+    return name
+
+
+def _strip_article(s: str) -> str:
+    """Strip a leading 'the', 'a', or 'an' (case-insensitive) from a string."""
+    return re.sub(r"^(the|a|an)\s+", "", s, flags=re.IGNORECASE).strip()
+
+
+def _rescore_candidates(query: str, candidates: list[dict]) -> list[dict]:
+    """
+    Re-score MusicBrainz candidates by blending the MB relevance score with
+    a local name-similarity score.
+
+    MB search alone can return "Rufus Beck" ahead of "Beck" when the query is
+    "Beck" (MB scores partial matches generously).  Adding local similarity
+    heavily penalises candidates whose name is significantly longer/different
+    from the query, so exact matches win.
+
+    When the query starts with a leading article ("The", "A", "An"), we also
+    compare article-stripped forms so that e.g. "The Watchmen" vs "The Beatles"
+    is measured as "Watchmen" vs "Beatles" (≈0.13) rather than comparing the
+    full strings (which share "The " and inflate the score).
+
+    Combined score formula:  MB_score × 0.4 + name_similarity × 100 × 0.6
+    Both components are in the 0-100 range; the result is clamped to 100.
+    """
+    q = query.lower()
+    q_core = _strip_article(q)
+    use_core = q_core != q  # query starts with an article
+
+    rescored = []
+    for c in candidates:
+        name = c["name"].lower()
+        sort_name = (c.get("sort_name") or c["name"]).lower()
+        if use_core:
+            name_sim = max(
+                SequenceMatcher(None, q_core, _strip_article(name)).ratio(),
+                SequenceMatcher(None, q_core, _strip_article(sort_name)).ratio(),
+            )
+        else:
+            name_sim = max(
+                SequenceMatcher(None, q, name).ratio(),
+                SequenceMatcher(None, q, sort_name).ratio(),
+            )
+        combined = round(min(100, c["score"] * 0.4 + name_sim * 100 * 0.6))
+        rescored.append({**c, "score": combined})
+    rescored.sort(key=lambda x: x["score"], reverse=True)
+    return rescored
 
 
 async def scan_music_directory_stream(
@@ -50,8 +124,10 @@ async def scan_music_directory_stream(
     for i, entry in enumerate(new_folders):
         album_count = sum(1 for sub in os.scandir(entry.path) if sub.is_dir())
 
+        query = _normalize_folder_name(entry.name)
         try:
-            candidates = await mb.search_artists(entry.name, limit=5)
+            candidates = await mb.search_artists(query, limit=5)
+            candidates = _rescore_candidates(query, candidates)
         except Exception:
             candidates = []
 
@@ -137,47 +213,131 @@ async def link_album_folders(artist_path: str, release_groups: list, db) -> None
         await db.commit()
 
 
+def _title_norm(s: str) -> str:
+    """Normalise a track title for fuzzy comparison."""
+    s = s.lower()
+    s = re.sub(r"[^\w\s]", " ", s)  # collapse punctuation to spaces
+    s = re.sub(r"\bthe\b", "", s)   # strip article "the"
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _titles_match(db_title: str, file_title: str) -> bool:
+    """Return True when titles are equivalent after normalisation."""
+    a, b = _title_norm(db_title), _title_norm(file_title)
+    if not a or not b:
+        return False
+    return a == b or (len(a) > 3 and a in b) or (len(b) > 3 and b in a)
+
+
 async def link_existing_files(library_path: str, db) -> int:
     """
     Walk library_path, find audio files, and match them to existing Track records
-    that don't yet have a file_path set. Returns the count of newly linked tracks.
+    that don't yet have a file_path set.  Uses a three-tier matching strategy:
+
+      1. Exact MusicBrainz recording MBID from embedded tags → Track.mbid
+      2. Tag-derived title + track number with normalised comparison
+      3. Filename-derived title + track number (original behaviour, fallback)
+
+    Returns the count of newly linked tracks.
     """
     from sqlalchemy import select
 
     from app.models import Artist, ReleaseGroup, Track
+    from app.services.library_watcher import AUDIO_EXTS
+    from app.services.tag_reader import read_tags
 
     if not os.path.isdir(library_path):
         return 0
 
-    # Scope matches to the artist whose folder this is, so that tracks from
-    # other artists with the same title/number don't cause ambiguity errors.
+    # Scope all queries to the artist whose folder this is.
     artist_folder = os.path.basename(library_path)
 
     count = 0
     for root, _, files in os.walk(library_path):
         for filename in files:
             path = os.path.join(root, filename)
-            info = _extract_track_info(path)
-            if not info:
+            if os.path.splitext(filename)[1].lower() not in AUDIO_EXTS:
                 continue
 
+            tags = read_tags(path)
+
+            # ── Tier 1: exact MBID match ──────────────────────────────────────
+            if tags and tags.recording_mbid:
+                result = await db.execute(
+                    select(Track)
+                    .join(ReleaseGroup, Track.release_group_id == ReleaseGroup.id)
+                    .join(Artist, ReleaseGroup.artist_id == Artist.id)
+                    .where(
+                        Artist.folder_name == artist_folder,
+                        Track.mbid == tags.recording_mbid,
+                        Track.file_path.is_(None),
+                    )
+                    .limit(1)
+                )
+                track = result.scalar_one_or_none()
+                if track:
+                    track.file_path = path
+                    count += 1
+                    continue
+
+            # ── Tiers 2 & 3: title + track-number matching ───────────────────
+            # Prefer tag-derived values; fall back to filename parsing.
+            info = _extract_track_info(path)
+            tag_title = tags.title if tags else None
+
+            track_num: int | None = None
+            disc_num: int = 1
+
+            # Tag track number (e.g. "10/13" → 10)
+            if tags and tags.track_number:
+                try:
+                    track_num = int(str(tags.track_number).split("/")[0])
+                except (ValueError, AttributeError):
+                    pass
+
+            # Filename fallback
+            if track_num is None and info:
+                track_num = info["track_number"]
+                disc_num = info["disc_number"]
+
+            if track_num is None:
+                continue
+
+            # Build ordered list of title candidates (tag first, then filename)
+            title_sources: list[str] = []
+            if tag_title:
+                title_sources.append(tag_title)
+            if info and info["title_guess"] and info["title_guess"] != tag_title:
+                title_sources.append(info["title_guess"])
+
+            if not title_sources:
+                continue
+
+            # Fetch all unlinked tracks for this artist at this position
             result = await db.execute(
                 select(Track)
                 .join(ReleaseGroup, Track.release_group_id == ReleaseGroup.id)
                 .join(Artist, ReleaseGroup.artist_id == Artist.id)
                 .where(
                     Artist.folder_name == artist_folder,
-                    Track.title.ilike(f"%{info['title_guess']}%"),
-                    Track.track_number == info["track_number"],
-                    Track.disc_number == info["disc_number"],
+                    Track.track_number == track_num,
+                    Track.disc_number == disc_num,
                     Track.file_path.is_(None),
                 )
-                .limit(1)
             )
-            track = result.scalar_one_or_none()
-            if track:
-                track.file_path = path
-                count += 1
+            candidates = result.scalars().all()
+            if not candidates:
+                continue
+
+            for title in title_sources:
+                matched = next(
+                    (c for c in candidates if _titles_match(c.title, title)),
+                    None,
+                )
+                if matched:
+                    matched.file_path = path
+                    count += 1
+                    break
 
     if count:
         await db.commit()

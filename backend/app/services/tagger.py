@@ -7,7 +7,7 @@ import hashlib
 import os
 
 from mutagen.flac import FLAC, Picture
-from mutagen.id3 import APIC, ID3, TALB, TDRC, TIT2, TPE1, TRCK
+from mutagen.id3 import APIC, ID3, TALB, TDRC, TIT2, TPE1, TPOS, TRCK, TXXX, UFID
 from mutagen.mp4 import MP4, MP4Cover
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
@@ -40,27 +40,34 @@ def tag_file(
     disc_number: int,
     year: str | None,
     cover_bytes: bytes | None = None,
+    recording_mbid: str | None = None,
+    release_group_mbid: str | None = None,
+    artist_mbid: str | None = None,
 ) -> None:
     ext = os.path.splitext(file_path)[1].lower()
+    mbids = (recording_mbid, release_group_mbid, artist_mbid)
 
     if ext in (".ogg",):
         # Detect opus vs vorbis by trying OggOpus first
         try:
-            _tag_ogg_opus(file_path, title, artist, album, track_number, disc_number, year, cover_bytes)
+            _tag_ogg_opus(file_path, title, artist, album, track_number, disc_number, year, cover_bytes, *mbids)
         except Exception:
-            _tag_ogg_vorbis(file_path, title, artist, album, track_number, disc_number, year, cover_bytes)
+            _tag_ogg_vorbis(file_path, title, artist, album, track_number, disc_number, year, cover_bytes, *mbids)
     elif ext == ".opus":
-        _tag_ogg_opus(file_path, title, artist, album, track_number, disc_number, year, cover_bytes)
+        _tag_ogg_opus(file_path, title, artist, album, track_number, disc_number, year, cover_bytes, *mbids)
     elif ext in (".mp3",):
-        _tag_mp3(file_path, title, artist, album, track_number, disc_number, year, cover_bytes)
+        _tag_mp3(file_path, title, artist, album, track_number, disc_number, year, cover_bytes, *mbids)
     elif ext in (".flac",):
-        _tag_flac(file_path, title, artist, album, track_number, disc_number, year, cover_bytes)
+        _tag_flac(file_path, title, artist, album, track_number, disc_number, year, cover_bytes, *mbids)
     elif ext in (".m4a", ".aac"):
-        _tag_m4a(file_path, title, artist, album, track_number, disc_number, year, cover_bytes)
+        _tag_m4a(file_path, title, artist, album, track_number, disc_number, year, cover_bytes, *mbids)
     # For unsupported formats we silently skip — not worth crashing the download
 
 
-def _tag_ogg_opus(file_path, title, artist, album, track_number, disc_number, year, cover_bytes):
+def _tag_ogg_opus(
+    file_path, title, artist, album, track_number, disc_number, year, cover_bytes,
+    recording_mbid=None, release_group_mbid=None, artist_mbid=None,
+):
     audio = OggOpus(file_path)
     audio["title"] = [title]
     audio["artist"] = [artist]
@@ -69,6 +76,12 @@ def _tag_ogg_opus(file_path, title, artist, album, track_number, disc_number, ye
     audio["discnumber"] = [str(disc_number)]
     if year:
         audio["date"] = [year]
+    if recording_mbid:
+        audio["musicbrainz_trackid"] = [recording_mbid]
+    if release_group_mbid:
+        audio["musicbrainz_releasegroupid"] = [release_group_mbid]
+    if artist_mbid:
+        audio["musicbrainz_artistid"] = [artist_mbid]
     if cover_bytes:
         pic = Picture()
         pic.type = 3
@@ -80,7 +93,10 @@ def _tag_ogg_opus(file_path, title, artist, album, track_number, disc_number, ye
     audio.save()
 
 
-def _tag_ogg_vorbis(file_path, title, artist, album, track_number, disc_number, year, cover_bytes):
+def _tag_ogg_vorbis(
+    file_path, title, artist, album, track_number, disc_number, year, cover_bytes,
+    recording_mbid=None, release_group_mbid=None, artist_mbid=None,
+):
     audio = OggVorbis(file_path)
     audio["title"] = [title]
     audio["artist"] = [artist]
@@ -89,6 +105,12 @@ def _tag_ogg_vorbis(file_path, title, artist, album, track_number, disc_number, 
     audio["discnumber"] = [str(disc_number)]
     if year:
         audio["date"] = [year]
+    if recording_mbid:
+        audio["musicbrainz_trackid"] = [recording_mbid]
+    if release_group_mbid:
+        audio["musicbrainz_releasegroupid"] = [release_group_mbid]
+    if artist_mbid:
+        audio["musicbrainz_artistid"] = [artist_mbid]
     if cover_bytes:
         pic = Picture()
         pic.type = 3
@@ -100,14 +122,30 @@ def _tag_ogg_vorbis(file_path, title, artist, album, track_number, disc_number, 
     audio.save()
 
 
-def _tag_mp3(file_path, title, artist, album, track_number, disc_number, year, cover_bytes):
+def _tag_mp3(
+    file_path, title, artist, album, track_number, disc_number, year, cover_bytes,
+    recording_mbid=None, release_group_mbid=None, artist_mbid=None,
+):
     audio = ID3(file_path)
     audio["TIT2"] = TIT2(encoding=3, text=title)
     audio["TPE1"] = TPE1(encoding=3, text=artist)
     audio["TALB"] = TALB(encoding=3, text=album)
     audio["TRCK"] = TRCK(encoding=3, text=str(track_number))
+    audio["TPOS"] = TPOS(encoding=3, text=str(disc_number))
     if year:
         audio["TDRC"] = TDRC(encoding=3, text=year)
+    if recording_mbid:
+        audio["UFID:http://musicbrainz.org"] = UFID(
+            owner="http://musicbrainz.org", data=recording_mbid.encode()
+        )
+    if release_group_mbid:
+        audio["TXXX:MusicBrainz Release Group Id"] = TXXX(
+            encoding=3, desc="MusicBrainz Release Group Id", text=release_group_mbid
+        )
+    if artist_mbid:
+        audio["TXXX:MusicBrainz Artist Id"] = TXXX(
+            encoding=3, desc="MusicBrainz Artist Id", text=artist_mbid
+        )
     if cover_bytes:
         audio["APIC"] = APIC(
             encoding=3, mime="image/jpeg", type=3, desc="Cover", data=cover_bytes
@@ -115,7 +153,10 @@ def _tag_mp3(file_path, title, artist, album, track_number, disc_number, year, c
     audio.save()
 
 
-def _tag_flac(file_path, title, artist, album, track_number, disc_number, year, cover_bytes):
+def _tag_flac(
+    file_path, title, artist, album, track_number, disc_number, year, cover_bytes,
+    recording_mbid=None, release_group_mbid=None, artist_mbid=None,
+):
     audio = FLAC(file_path)
     audio["title"] = [title]
     audio["artist"] = [artist]
@@ -124,6 +165,12 @@ def _tag_flac(file_path, title, artist, album, track_number, disc_number, year, 
     audio["discnumber"] = [str(disc_number)]
     if year:
         audio["date"] = [year]
+    if recording_mbid:
+        audio["musicbrainz_trackid"] = [recording_mbid]
+    if release_group_mbid:
+        audio["musicbrainz_releasegroupid"] = [release_group_mbid]
+    if artist_mbid:
+        audio["musicbrainz_artistid"] = [artist_mbid]
     if cover_bytes:
         pic = Picture()
         pic.type = 3
@@ -133,7 +180,10 @@ def _tag_flac(file_path, title, artist, album, track_number, disc_number, year, 
     audio.save()
 
 
-def _tag_m4a(file_path, title, artist, album, track_number, disc_number, year, cover_bytes):
+def _tag_m4a(
+    file_path, title, artist, album, track_number, disc_number, year, cover_bytes,
+    recording_mbid=None, release_group_mbid=None, artist_mbid=None,
+):
     audio = MP4(file_path)
     audio["\xa9nam"] = [title]
     audio["\xa9ART"] = [artist]
@@ -142,6 +192,12 @@ def _tag_m4a(file_path, title, artist, album, track_number, disc_number, year, c
     audio["disk"] = [(disc_number, 0)]
     if year:
         audio["\xa9day"] = [year]
+    if recording_mbid:
+        audio["----:com.apple.iTunes:MusicBrainz Track Id"] = [recording_mbid.encode()]
+    if release_group_mbid:
+        audio["----:com.apple.iTunes:MusicBrainz Release Group Id"] = [release_group_mbid.encode()]
+    if artist_mbid:
+        audio["----:com.apple.iTunes:MusicBrainz Artist Id"] = [artist_mbid.encode()]
     if cover_bytes:
         audio["covr"] = [MP4Cover(cover_bytes, imageformat=MP4Cover.FORMAT_JPEG)]
     audio.save()

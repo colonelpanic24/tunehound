@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 
+import pydantic
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, func, select
@@ -413,6 +414,85 @@ async def get_orphaned_files(
         })
 
     return {"items": items, "total": total, "offset": offset, "has_more": offset + limit < total}
+
+
+class RenameFolderRequest(pydantic.BaseModel):
+    old_name: str
+    new_name: str
+
+
+@router.post("/rename-folder")
+async def rename_artist_folder(body: RenameFolderRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Rename an artist folder on disk and update all DB records that reference the old path.
+
+    Stops the library watcher during the rename to prevent spurious delete/create events
+    from corrupting track file_path records.
+    """
+    import shutil
+
+    from app.services.library_watcher import start_library_watcher, stop_library_watcher
+
+    old_path = os.path.join(settings.music_library_path, body.old_name)
+    new_path = os.path.join(settings.music_library_path, body.new_name)
+
+    if not os.path.isdir(old_path):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Folder not found: {body.old_name}")
+    if os.path.exists(new_path):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=409, detail=f"Destination already exists: {body.new_name}")
+
+    # Stop watcher so it doesn't fire on-delete / on-create during the rename
+    stop_library_watcher()
+    try:
+        shutil.move(old_path, new_path)
+    except Exception as exc:
+        # Restart watcher even on failure
+        import asyncio as _asyncio
+        loop = _asyncio.get_event_loop()
+        start_library_watcher(settings.music_library_path, loop)
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Update DB: Artist.folder_name
+    result = await db.execute(select(Artist).where(Artist.folder_name == body.old_name))
+    artist = result.scalar_one_or_none()
+    if artist:
+        artist.folder_name = body.new_name
+
+    # Update Track.file_path for all tracks under the old path
+    old_prefix = old_path + os.sep
+    new_prefix = new_path + os.sep
+    result2 = await db.execute(
+        select(Track).where(Track.file_path.like(old_prefix + "%"))
+    )
+    tracks = result2.scalars().all()
+    for track in tracks:
+        if track.file_path and track.file_path.startswith(old_prefix):
+            track.file_path = new_prefix + track.file_path[len(old_prefix):]
+
+    # Update ReleaseGroup.folder_path if the model has it
+    try:
+        from app.models import ReleaseGroup as RG
+        if hasattr(RG, "folder_path"):
+            rg_result = await db.execute(
+                select(RG).where(RG.folder_path.like(old_prefix + "%"))
+            )
+            for rg in rg_result.scalars().all():
+                if rg.folder_path and rg.folder_path.startswith(old_prefix):
+                    rg.folder_path = new_prefix + rg.folder_path[len(old_prefix):]
+    except Exception:
+        pass
+
+    await db.commit()
+
+    # Restart watcher
+    import asyncio as _asyncio
+    loop = _asyncio.get_event_loop()
+    start_library_watcher(settings.music_library_path, loop)
+
+    return {"old_name": body.old_name, "new_name": body.new_name, "tracks_updated": len(tracks)}
 
 
 @router.delete("/artists", status_code=204)

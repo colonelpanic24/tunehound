@@ -98,6 +98,7 @@ export default function ArtistsPage() {
           <select
             value={field}
             onChange={(e) => setSort(e.target.value as ArtistSortField, dir)}
+            aria-label="Sort by"
             className="text-sm bg-muted border border-border rounded-md px-3 py-1.5 text-foreground focus:outline-none focus:border-primary"
           >
             {SORT_FIELDS.map((o) => (
@@ -110,6 +111,7 @@ export default function ArtistsPage() {
                 <Button
                   variant="outline"
                   size="icon-sm"
+                  aria-label={DIR_LABELS[field][dir]}
                   onClick={() => setSort(field, dir === "asc" ? "desc" : "asc")}
                 />
               }
@@ -132,6 +134,7 @@ export default function ArtistsPage() {
           </span>
           <button
             onClick={() => setFolderNotice(null)}
+            aria-label="Dismiss"
             className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
           >
             ✕
@@ -237,6 +240,7 @@ function ArtistCard({
             <Button
               variant="ghost"
               size="icon-xs"
+              aria-label={`Remove ${artist.name}`}
               onClick={(e) => {
                 e.stopPropagation();
                 if (confirm(`Remove ${artist.name}?`)) removeMutation.mutate();

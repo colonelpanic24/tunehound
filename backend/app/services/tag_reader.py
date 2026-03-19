@@ -15,6 +15,7 @@ class TagSnapshot:
     album: str | None = None
     track_number: str | None = None
     art_hash: str | None = None
+    recording_mbid: str | None = None
     scanned_at: datetime = dc_field(default_factory=datetime.utcnow)
 
 
@@ -42,6 +43,10 @@ def read_tags(file_path: str) -> TagSnapshot | None:
             snap.artist = _first(tags.get('TPE1'))
             snap.album = _first(tags.get('TALB'))
             snap.track_number = _first(tags.get('TRCK'))
+            # MusicBrainz recording ID (stored as UFID frame)
+            ufid = tags.get('UFID:http://musicbrainz.org')
+            if ufid:
+                snap.recording_mbid = ufid.data.decode('utf-8', errors='ignore').strip() or None
             # Cover art
             for key in tags.keys():
                 if key.startswith('APIC'):
@@ -54,6 +59,7 @@ def read_tags(file_path: str) -> TagSnapshot | None:
             snap.artist = _first(tags.get('artist'))
             snap.album = _first(tags.get('album'))
             snap.track_number = _first(tags.get('tracknumber'))
+            snap.recording_mbid = _first(tags.get('musicbrainz_trackid'))
             pics = audio.pictures
             if pics:
                 snap.art_hash = _hash_bytes(pics[0].data)
@@ -65,6 +71,10 @@ def read_tags(file_path: str) -> TagSnapshot | None:
             trk = tags.get('trkn')
             if trk:
                 snap.track_number = str(trk[0][0]) if trk[0] else None
+            mb_trk = tags.get('----:com.apple.iTunes:MusicBrainz Track Id')
+            if mb_trk:
+                v = mb_trk[0]
+                snap.recording_mbid = (v.decode('utf-8') if isinstance(v, (bytes, bytearray)) else str(v)).strip() or None
             covr = tags.get('covr')
             if covr:
                 snap.art_hash = _hash_bytes(bytes(covr[0]))
@@ -74,6 +84,7 @@ def read_tags(file_path: str) -> TagSnapshot | None:
             snap.artist = _first(tags.get('artist'))
             snap.album = _first(tags.get('album'))
             snap.track_number = _first(tags.get('tracknumber'))
+            snap.recording_mbid = _first(tags.get('musicbrainz_trackid'))
             # Vorbis cover art (METADATA_BLOCK_PICTURE in base64)
             import base64
             pics = tags.get('metadata_block_picture') or tags.get('METADATA_BLOCK_PICTURE')

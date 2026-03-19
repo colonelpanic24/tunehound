@@ -145,6 +145,7 @@ export default function AlbumsPage() {
               <select
                 value={field}
                 onChange={(e) => setSort(e.target.value as AlbumSortField, dir)}
+                aria-label="Sort by"
                 className="text-sm bg-muted border border-border rounded-md px-3 py-1.5 text-foreground focus:outline-none focus:border-primary"
               >
                 {SORT_FIELDS.map((o) => (
@@ -157,6 +158,7 @@ export default function AlbumsPage() {
                     <Button
                       variant="outline"
                       size="icon-sm"
+                      aria-label={DIR_LABELS[field][dir]}
                       onClick={() => setSort(field, dir === "asc" ? "desc" : "asc")}
                     />
                   }

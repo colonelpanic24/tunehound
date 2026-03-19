@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
-  Music2, Disc3, ListMusic, HardDrive, Download, Plus, ScanLine, FileAudio, Trash2, Square,
+  Music2, Disc3, ListMusic, HardDrive, Download, Plus, ScanLine, FileAudio, Square,
 } from "lucide-react";
 import { getStats, listArtists, getOrphanedFiles } from "@/api/client";
 import AddArtistModal from "@/components/AddArtistModal";
@@ -17,6 +17,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Artist, OrphanedFile } from "@/types";
 
@@ -38,7 +41,7 @@ export default function DashboardPage() {
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: getStats, staleTime: 30_000 });
   const { data: artists = [] } = useQuery({ queryKey: ["artists"], queryFn: listArtists });
 
-  const { state, startScan, cancelScan, clearAll, reset, importReviewItem, skipReviewItem } = useImport();
+  const { state, startScan, cancelScan, reset, importReviewItem, skipReviewItem } = useImport();
   const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, summary, error, needsReview } = state;
   const importActive = phase === "scanning";
 
@@ -195,7 +198,6 @@ export default function DashboardPage() {
               needsReview={needsReview}
               startScan={startScan}
               cancelScan={cancelScan}
-              clearAll={clearAll}
               reset={reset}
               importReviewItem={importReviewItem}
               skipReviewItem={skipReviewItem}
@@ -283,7 +285,7 @@ function formatElapsed(s: number): string {
 
 function ImportTab({
   isActive, phase, scanDone, scanTotal, importDone, importTotal,
-  currentStep, log, summary, error, needsReview, startScan, cancelScan, clearAll, reset,
+  currentStep, log, summary, error, needsReview, startScan, cancelScan, reset,
   importReviewItem, skipReviewItem,
 }: {
   isActive: boolean;
@@ -299,13 +301,10 @@ function ImportTab({
   needsReview: import("@/context/ImportContext").NeedsReviewItem[];
   startScan: () => void;
   cancelScan: () => Promise<void>;
-  clearAll: () => Promise<void>;
   reset: () => void;
   importReviewItem: (folder: string, mbid: string) => Promise<void>;
   skipReviewItem: (folder: string) => void;
 }) {
-  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const [summaryVisible, setSummaryVisible] = useState(false);
 
   useEffect(() => {
@@ -315,13 +314,6 @@ function ImportTab({
       return () => { clearTimeout(show); clearTimeout(hide); };
     }
   }, [phase, summary]);
-
-  const handleClearConfirm = async () => {
-    setClearing(true);
-    await clearAll();
-    setClearing(false);
-    setClearConfirmOpen(false);
-  };
 
   return (
     <div className="max-w-2xl">
@@ -349,45 +341,8 @@ function ImportTab({
               Clear
             </Button>
           )}
-          <Button variant="destructive" onClick={() => setClearConfirmOpen(true)} className="ml-auto">
-            Clear All Artists
-          </Button>
         </div>
       )}
-
-      <Dialog open={clearConfirmOpen} onOpenChange={(o) => { if (!o) setClearConfirmOpen(false); }}>
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>Clear all artists from the library?</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 text-sm text-muted-foreground">
-            <p>
-              This will remove all artists, albums, and track records from TuneHound's database.
-            </p>
-            <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
-              <p className="text-foreground font-medium">Your music files will not be touched.</p>
-              <p className="mt-0.5">
-                No files will be deleted from disk. You can re-import your library at any time by scanning again.
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setClearConfirmOpen(false)} disabled={clearing}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleClearConfirm} disabled={clearing}>
-              {clearing ? (
-                <span className="flex items-center gap-1.5">Clearing…</span>
-              ) : (
-                <>
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Clear library
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {error && <p className="mt-4 text-destructive text-sm">{error}</p>}
 
@@ -418,11 +373,15 @@ function ImportTab({
             <span className="text-foreground">
               {scanTotal === 0
                 ? "Discovering folders…"
-                : `Scanning ${scanDone} / ${scanTotal} folders`}
+                : scanDone < scanTotal
+                  ? `Scanning ${scanDone} / ${scanTotal} folders`
+                  : importTotal > 0
+                    ? `Importing artists…`
+                    : "Finalising…"}
             </span>
             {importTotal > 0 && (
               <span className="text-xs text-muted-foreground">
-                {importDone} / {importTotal} artists imported
+                {importDone} / {importTotal} imported
               </span>
             )}
           </div>
@@ -515,7 +474,21 @@ function OrphanedTab({ query }: { query: ReturnType<typeof useInfiniteQuery> }) 
   );
 }
 
+// ── Folder rename helper ───────────────────────────────────────────────────────
+
+function toExpectedFolderName(artistName: string): string {
+  // Mirror the Python _safe() function in downloader.py
+  // eslint-disable-next-line no-control-regex
+  return artistName.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^[.\s]+|[.\s]+$/g, "");
+}
+
 // ── NeedsReviewCard ────────────────────────────────────────────────────────────
+
+interface RenamePrompt {
+  mbid: string;
+  currentFolder: string;
+  suggestedFolder: string;
+}
 
 function NeedsReviewCard({
   item, onImport, onSkip,
@@ -526,12 +499,39 @@ function NeedsReviewCard({
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [renamePrompt, setRenamePrompt] = useState<RenamePrompt | null>(null);
   const top = item.candidates[0];
 
-  const handleImport = async (mbid: string) => {
-    setImporting(true);
+  const handleImport = async (mbid: string, artistName: string) => {
     setSearchOpen(false);
+    const suggested = toExpectedFolderName(artistName);
+    if (suggested !== item.folder) {
+      setRenamePrompt({ mbid, currentFolder: item.folder, suggestedFolder: suggested });
+      return;
+    }
+    setImporting(true);
     await onImport(item.folder, mbid);
+  };
+
+  const handleRenameChoice = async (rename: boolean) => {
+    if (!renamePrompt) return;
+    const { mbid, currentFolder, suggestedFolder } = renamePrompt;
+    setRenamePrompt(null);
+    setImporting(true);
+    if (rename) {
+      try {
+        await fetch("/api/library/rename-folder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ old_name: currentFolder, new_name: suggestedFolder }),
+        });
+        await onImport(suggestedFolder, mbid);
+      } catch {
+        await onImport(currentFolder, mbid);
+      }
+    } else {
+      await onImport(currentFolder, mbid);
+    }
   };
 
   return (
@@ -551,7 +551,12 @@ function NeedsReviewCard({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {top && (
-            <Button size="sm" variant="outline" disabled={importing} onClick={() => handleImport(top.mbid)}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={importing}
+              onClick={() => handleImport(top.mbid, top.name)}
+            >
               {importing ? "Importing…" : `Import as ${top.name}`}
             </Button>
           )}
@@ -561,13 +566,49 @@ function NeedsReviewCard({
           </Button>
         </div>
       </div>
+
       <ArtistSearchDialog
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
         initialQuery={item.folder}
         title={`Find artist for "${item.folder}"`}
-        onConfirm={(mbid) => handleImport(mbid)}
+        onConfirm={(mbid, name) => handleImport(mbid, name)}
       />
+
+      {renamePrompt && (
+        <Dialog open onOpenChange={(o) => { if (!o) setRenamePrompt(null); }}>
+          <DialogContent showCloseButton={false}>
+            <DialogHeader>
+              <DialogTitle>Rename folder before importing?</DialogTitle>
+            </DialogHeader>
+            <div className="text-sm text-muted-foreground space-y-2">
+              <p>
+                This artist would match better with the canonical folder name.
+              </p>
+              <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5 font-mono text-xs space-y-1">
+                <p><span className="text-muted-foreground">Current: </span><span className="text-foreground">{renamePrompt.currentFolder}</span></p>
+                <p><span className="text-muted-foreground">Suggested: </span><span className="text-foreground">{renamePrompt.suggestedFolder}</span></p>
+              </div>
+            </div>
+            <DialogFooter>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger render={<Button variant="outline" onClick={() => handleRenameChoice(false)}>No, keep as is</Button>} />
+                  <TooltipContent side="bottom">
+                    Your directory won't be changed, but you'll have this matching issue if you ever clear and rescan your library.
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger render={<Button onClick={() => handleRenameChoice(true)}>Yes, rename</Button>} />
+                  <TooltipContent side="bottom">
+                    This will rename the folder on disk but won't change any music files inside it.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }

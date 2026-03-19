@@ -19,7 +19,7 @@ interface ArtistSearchDialogProps {
   onClose: () => void;
   initialQuery?: string;
   title?: string;
-  onConfirm: (mbid: string) => void;
+  onConfirm: (mbid: string, name: string) => void;
   confirmLabel?: string;
 }
 
@@ -174,7 +174,7 @@ export function ArtistSearchDialog({
                 if (!selected) return;
                 setConfirming(true);
                 try {
-                  await onConfirm(selected.mbid);
+                  await onConfirm(selected.mbid, selected.name);
                 } finally {
                   setConfirming(false);
                 }

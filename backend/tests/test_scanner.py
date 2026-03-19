@@ -4,6 +4,8 @@ import os
 import pytest
 
 from app.services.scanner import (
+    _rescore_candidates,
+    _strip_article,
     link_album_folders,
     link_existing_files,
     scan_music_directory_stream,
@@ -210,3 +212,81 @@ async def test_link_album_folders_no_duplicate_assignment(tmp_path, db_session):
     assigned = [rg for rg in [rg1, rg2] if rg.folder_path is not None]
     assert len(assigned) == 1
     assert assigned[0].folder_path == str(album_dir)
+
+
+# ── _strip_article ─────────────────────────────────────────────────────────────
+
+
+def test_strip_article_the():
+    assert _strip_article("The Beatles") == "Beatles"
+
+
+def test_strip_article_a():
+    assert _strip_article("A Tribe Called Quest") == "Tribe Called Quest"
+
+
+def test_strip_article_an():
+    assert _strip_article("An Artist") == "Artist"
+
+
+def test_strip_article_no_article():
+    assert _strip_article("Radiohead") == "Radiohead"
+
+
+def test_strip_article_case_insensitive():
+    assert _strip_article("THE Watchmen") == "Watchmen"
+
+
+def test_strip_article_embedded_the_untouched():
+    # "the" mid-string should not be stripped
+    assert _strip_article("Matthew Good") == "Matthew Good"
+
+
+# ── _rescore_candidates ────────────────────────────────────────────────────────
+
+
+def _make_candidate(name: str, sort_name: str | None = None, score: int = 100) -> dict:
+    return {"mbid": "x", "name": name, "sort_name": sort_name or name, "score": score}
+
+
+def test_rescore_exact_match_wins():
+    candidates = [
+        _make_candidate("Beck"),
+        _make_candidate("Rufus Beck"),
+    ]
+    result = _rescore_candidates("Beck", candidates)
+    assert result[0]["name"] == "Beck"
+
+
+def test_rescore_article_aware_watchmen_vs_beatles():
+    """'The Watchmen' query should not highly score 'The Beatles'."""
+    candidates = [
+        _make_candidate("The Watchmen"),
+        _make_candidate("The Beatles"),
+    ]
+    result = _rescore_candidates("The Watchmen", candidates)
+    assert result[0]["name"] == "The Watchmen"
+    # Gap should be significant — Watchmen score clearly beats Beatles score
+    watchmen_score = next(c["score"] for c in result if c["name"] == "The Watchmen")
+    beatles_score = next(c["score"] for c in result if c["name"] == "The Beatles")
+    assert watchmen_score > beatles_score + 20
+
+
+def test_rescore_article_query_matches_stripped_candidate():
+    """'The Artists' query should match a candidate also named 'The Artists' top."""
+    candidates = [
+        _make_candidate("The Artists"),
+        _make_candidate("Something Else"),
+    ]
+    result = _rescore_candidates("The Artists", candidates)
+    assert result[0]["name"] == "The Artists"
+
+
+def test_rescore_no_article_uses_full_name():
+    """Non-article query compares full strings (no stripping)."""
+    candidates = [
+        _make_candidate("Radiohead"),
+        _make_candidate("Radioheads Cover Band"),
+    ]
+    result = _rescore_candidates("Radiohead", candidates)
+    assert result[0]["name"] == "Radiohead"
