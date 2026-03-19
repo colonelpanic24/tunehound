@@ -442,6 +442,7 @@ class ScanJobManager:
                         linked = await scanner.link_existing_files(artist_path, db)
                         files_linked += linked
                         await _scan_tags_for_artist(artist_path, db, read_tags)
+                        await scanner.link_album_folders(artist_path, release_groups, db)
 
                     await db.refresh(artist)
                     artist_out = ArtistOut.model_validate(artist)

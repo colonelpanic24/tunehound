@@ -73,6 +73,70 @@ async def scan_music_directory_stream(
     yield {"type": "done"}
 
 
+async def link_album_folders(artist_path: str, release_groups: list, db) -> None:
+    """
+    Fuzzy-match each release group against subfolders of artist_path and
+    persist ReleaseGroup.folder_path.  Same logic as get_artist_disk_status
+    so availability is populated at import time rather than on first page load.
+    """
+    import re
+    from difflib import SequenceMatcher
+
+    THRESHOLD = 0.65
+
+    def _norm(s: str) -> str:
+        s = s.lower()
+        s = re.sub(r"\s*[\(\[]\d{4}[\)\]]\s*", " ", s)
+        s = re.sub(r"\b(disc|disk|vol|volume)\s*\d*\b", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"[^\w\s]", " ", s)
+        s = re.sub(r"\bthe\b", "", s)
+        return " ".join(s.split())
+
+    def _score(folder_name: str, rg_title: str) -> float:
+        a, b = _norm(folder_name), _norm(rg_title)
+        return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+
+    if not os.path.isdir(artist_path):
+        return
+
+    try:
+        disk_folders = [
+            {"name": e.name, "path": e.path}
+            for e in sorted(os.scandir(artist_path), key=lambda e: e.name)
+            if e.is_dir()
+        ]
+    except OSError:
+        return
+
+    if not disk_folders:
+        return
+
+    used: set[str] = set()
+    changed = False
+    for rg in release_groups:
+        best, best_score = None, 0.0
+        for folder in disk_folders:
+            if folder["path"] in used:
+                continue
+            s = _score(folder["name"], rg.title)
+            if s > best_score:
+                best_score = s
+                best = folder
+        if best and best_score >= THRESHOLD:
+            used.add(best["path"])
+            try:
+                file_count = sum(1 for f in os.scandir(best["path"]) if not f.is_dir())
+            except OSError:
+                file_count = 0
+            if rg.folder_path != best["path"] or rg.file_count != file_count:
+                rg.folder_path = best["path"]
+                rg.file_count = file_count
+                changed = True
+
+    if changed:
+        await db.commit()
+
+
 async def link_existing_files(library_path: str, db) -> int:
     """
     Walk library_path, find audio files, and match them to existing Track records

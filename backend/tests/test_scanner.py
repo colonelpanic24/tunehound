@@ -4,7 +4,7 @@ import os
 import pytest
 import pytest_asyncio
 
-from app.services.scanner import link_existing_files, scan_music_directory_stream
+from app.services.scanner import link_album_folders, link_existing_files, scan_music_directory_stream
 
 
 @pytest.mark.asyncio
@@ -120,3 +120,90 @@ async def test_link_existing_files_matches_track(tmp_path, db_session):
 
     await db_session.refresh(track)
     assert track.file_path == str(track_file)
+
+
+# ── link_album_folders ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_link_album_folders_nonexistent_path(db_session):
+    """Returns without error when artist path doesn't exist."""
+    from tests.conftest import seed_artist, seed_release_group
+
+    artist = await seed_artist(db_session)
+    rg = await seed_release_group(db_session, artist_id=artist.id, title="Some Album")
+
+    await link_album_folders("/nonexistent/path", [rg], db_session)
+
+    await db_session.refresh(rg)
+    assert rg.folder_path is None
+
+
+@pytest.mark.asyncio
+async def test_link_album_folders_matches_folder(tmp_path, db_session):
+    """Sets folder_path and file_count on matching release groups."""
+    from tests.conftest import seed_artist, seed_release_group
+
+    artist_dir = tmp_path / "Test Artist"
+    artist_dir.mkdir()
+    album_dir = artist_dir / "Great Album"
+    album_dir.mkdir()
+    (album_dir / "01 - Track.mp3").write_bytes(b"\x00" * 10)
+    (album_dir / "02 - Track.mp3").write_bytes(b"\x00" * 10)
+
+    artist = await seed_artist(db_session, folder_name="Test Artist")
+    rg = await seed_release_group(db_session, artist_id=artist.id, title="Great Album")
+
+    await link_album_folders(str(artist_dir), [rg], db_session)
+
+    await db_session.refresh(rg)
+    assert rg.folder_path == str(album_dir)
+    assert rg.file_count == 2
+
+
+@pytest.mark.asyncio
+async def test_link_album_folders_no_match_below_threshold(tmp_path, db_session):
+    """Does not set folder_path when similarity is too low."""
+    from tests.conftest import seed_artist, seed_release_group
+
+    artist_dir = tmp_path / "Artist"
+    artist_dir.mkdir()
+    (artist_dir / "Completely Different Name").mkdir()
+
+    artist = await seed_artist(db_session, folder_name="Artist")
+    rg = await seed_release_group(db_session, artist_id=artist.id, title="Nothing Alike ZZZZ")
+
+    await link_album_folders(str(artist_dir), [rg], db_session)
+
+    await db_session.refresh(rg)
+    assert rg.folder_path is None
+
+
+@pytest.mark.asyncio
+async def test_link_album_folders_no_duplicate_assignment(tmp_path, db_session):
+    """Each disk folder is assigned to at most one release group."""
+    from tests.conftest import seed_artist, seed_release_group
+
+    artist_dir = tmp_path / "Artist"
+    artist_dir.mkdir()
+    album_dir = artist_dir / "Shared Album"
+    album_dir.mkdir()
+
+    artist = await seed_artist(db_session, folder_name="Artist")
+    rg1 = await seed_release_group(
+        db_session, artist_id=artist.id, title="Shared Album",
+        mbid="rg000001-0000-0000-0000-000000000001"
+    )
+    rg2 = await seed_release_group(
+        db_session, artist_id=artist.id, title="Shared Album",
+        mbid="rg000001-0000-0000-0000-000000000002"
+    )
+
+    await link_album_folders(str(artist_dir), [rg1, rg2], db_session)
+
+    await db_session.refresh(rg1)
+    await db_session.refresh(rg2)
+    # Only one of them gets the folder
+    assigned = [rg for rg in [rg1, rg2] if rg.folder_path is not None]
+    assert len(assigned) == 1
+    assert assigned[0].folder_path == str(album_dir)

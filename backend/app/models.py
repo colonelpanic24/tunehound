@@ -51,6 +51,7 @@ class ReleaseGroup(Base):
     first_release_date: Mapped[str | None] = mapped_column(String)  # YYYY, YYYY-MM, or YYYY-MM-DD
     cover_art_url: Mapped[str | None] = mapped_column(String)
     folder_path: Mapped[str | None] = mapped_column(String)
+    file_count: Mapped[int | None] = mapped_column(Integer)
     cover_art_hash: Mapped[str | None] = mapped_column(String)
     description: Mapped[str | None] = mapped_column(Text)
     watched: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -171,7 +172,7 @@ class DownloadSettings(Base):
     __tablename__ = "download_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    audio_format: Mapped[str] = mapped_column(String, default="opus")
+    audio_format: Mapped[str] = mapped_column(String, default="mp3")
     # yt-dlp format selector
     yt_format: Mapped[str] = mapped_column(String, default="bestaudio")
     delay_min: Mapped[float] = mapped_column(Float, default=5.0)

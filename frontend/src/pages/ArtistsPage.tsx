@@ -1,21 +1,88 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Plus, UserX } from "lucide-react";
-import { listArtists, unsubscribeArtist } from "@/api/client";
+import { Plus, UserX, ArrowUp, ArrowDown } from "lucide-react";
+import { listArtists, listAlbums, unsubscribeArtist } from "@/api/client";
 import AddArtistModal from "@/components/AddArtistModal";
-import { useQueryClient, useMutation } from "@tanstack/react-query";
 import type { Artist } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+type ArtistSortField = "name" | "added" | "avail";
+type SortDir = "asc" | "desc";
+
+const SORT_FIELDS: { value: ArtistSortField; label: string }[] = [
+  { value: "name", label: "Name" },
+  { value: "added", label: "Date added" },
+  { value: "avail", label: "Availability" },
+];
+
+const DIR_LABELS: Record<ArtistSortField, { asc: string; desc: string }> = {
+  name:  { asc: "A → Z",        desc: "Z → A" },
+  added: { asc: "Oldest first",  desc: "Newest first" },
+  avail: { asc: "Least first",   desc: "Most first" },
+};
+
+/** Interpolates green (100%) → yellow (75%) → red (≤25%) */
+function availColor(pct: number): string {
+  const p = Math.max(0, Math.min(100, pct));
+  if (p >= 75) {
+    const t = (p - 75) / 25;
+    return `hsl(${Math.round(50 + t * 92)} 75% 45%)`;
+  }
+  if (p >= 25) {
+    const t = (p - 25) / 50;
+    return `hsl(${Math.round(t * 50)} 80% 50%)`;
+  }
+  return "hsl(0 72% 50%)";
+}
+
 export default function ArtistsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [folderNotice, setFolderNotice] = useState<string | null>(null);
+  const [field, setField] = useState<ArtistSortField>(
+    () => (localStorage.getItem("artistList.sortField") as ArtistSortField) ?? "name"
+  );
+  const [dir, setDir] = useState<SortDir>(
+    () => (localStorage.getItem("artistList.sortDir") as SortDir) ?? "asc"
+  );
+
   const { data: artists = [], isLoading } = useQuery({
     queryKey: ["artists"],
     queryFn: listArtists,
   });
+
+  const { data: albums = [] } = useQuery({
+    queryKey: ["albums"],
+    queryFn: listAlbums,
+    staleTime: 60_000,
+  });
+
+  // availability: fraction of albums on disk per artist (0–1)
+  const availMap = new Map<number, number>();
+  for (const artist of artists) {
+    const artistAlbums = albums.filter((a) => a.artist_id === artist.id);
+    availMap.set(
+      artist.id,
+      artistAlbums.length === 0
+        ? 0
+        : artistAlbums.filter((a) => a.folder_path !== null).length / artistAlbums.length
+    );
+  }
+
+  const sorted = [...artists].sort((a, b) => {
+    let cmp = 0;
+    if (field === "name")  cmp = (a.sort_name ?? a.name).localeCompare(b.sort_name ?? b.name);
+    if (field === "added") cmp = a.created_at.localeCompare(b.created_at);
+    if (field === "avail") cmp = (availMap.get(a.id) ?? 0) - (availMap.get(b.id) ?? 0);
+    return dir === "desc" ? -cmp : cmp;
+  });
+
+  const setSort = (f: ArtistSortField, d: SortDir) => {
+    setField(f); setDir(d);
+    localStorage.setItem("artistList.sortField", f);
+    localStorage.setItem("artistList.sortDir", d);
+  };
 
   useEffect(() => {
     if (!folderNotice) return;
@@ -27,10 +94,35 @@ export default function ArtistsPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-foreground">Artists</h1>
-        <Button onClick={() => setShowAdd(true)}>
-          <Plus className="w-4 h-4" />
-          Add Artist
-        </Button>
+        <div className="flex items-center gap-2">
+          <select
+            value={field}
+            onChange={(e) => setSort(e.target.value as ArtistSortField, dir)}
+            className="text-sm bg-muted border border-border rounded-md px-3 py-1.5 text-foreground focus:outline-none focus:border-primary"
+          >
+            {SORT_FIELDS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => setSort(field, dir === "asc" ? "desc" : "asc")}
+                />
+              }
+            >
+              {dir === "asc" ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+            </TooltipTrigger>
+            <TooltipContent>{DIR_LABELS[field][dir]}</TooltipContent>
+          </Tooltip>
+          <Button onClick={() => setShowAdd(true)}>
+            <Plus className="w-4 h-4" />
+            Add Artist
+          </Button>
+        </div>
       </div>
 
       {folderNotice && (
@@ -63,8 +155,12 @@ export default function ArtistsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {artists.map((artist) => (
-            <ArtistCard key={artist.id} artist={artist} />
+          {sorted.map((artist) => (
+            <ArtistCard
+              key={artist.id}
+              artist={artist}
+              availability={availMap.get(artist.id) ?? 0}
+            />
           ))}
         </div>
       )}
@@ -81,7 +177,13 @@ export default function ArtistsPage() {
   );
 }
 
-function ArtistCard({ artist }: { artist: Artist }) {
+function ArtistCard({
+  artist,
+  availability,
+}: {
+  artist: Artist;
+  availability: number;
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -89,6 +191,8 @@ function ArtistCard({ artist }: { artist: Artist }) {
     mutationFn: () => unsubscribeArtist(artist.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["artists"] }),
   });
+
+  const pct = Math.round(availability * 100);
 
   return (
     <div
@@ -116,6 +220,13 @@ function ArtistCard({ artist }: { artist: Artist }) {
           {artist.disambiguation && (
             <p className="text-xs text-white/70 truncate">{artist.disambiguation}</p>
           )}
+        </div>
+        {/* Availability badge */}
+        <div
+          className="absolute bottom-2 right-2 bg-black/60 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums"
+          style={{ color: availColor(pct) }}
+        >
+          {pct}%
         </div>
       </div>
 

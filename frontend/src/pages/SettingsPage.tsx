@@ -4,30 +4,9 @@ import { getDownloadSettings, updateDownloadSettings } from "@/api/client";
 import type { DownloadSettings } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { useTheme } from "@/hooks/useTheme";
 import { Sun, Moon } from "lucide-react";
 
-interface SaveBarProps {
-  saved: boolean;
-  isDirty: boolean;
-  isPending: boolean;
-  onSave: () => void;
-}
-
-function SaveBar({ saved, isDirty, isPending, onSave }: SaveBarProps) {
-  return (
-    <>
-      <Separator />
-      <div className="flex items-center justify-end gap-3 pt-1">
-        {saved && <span className="text-xs text-success">Saved</span>}
-        <Button onClick={onSave} disabled={!isDirty || isPending}>
-          Save
-        </Button>
-      </div>
-    </>
-  );
-}
 
 const YT_FORMAT_PRESETS = [
   { label: "Best audio only (recommended)", value: "bestaudio" },
@@ -101,13 +80,6 @@ export default function SettingsPage() {
 
   const inputClass =
     "mt-1 w-full bg-muted border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary placeholder:text-muted-foreground";
-
-  const saveBarProps: SaveBarProps = {
-    saved,
-    isDirty,
-    isPending: mutation.isPending,
-    onSave: () => mutation.mutate(form),
-  };
 
   return (
     <div className="p-6 max-w-2xl space-y-4">
@@ -201,7 +173,6 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          <SaveBar {...saveBarProps} />
         </CardContent>
       </Card>
 
@@ -217,10 +188,10 @@ export default function SettingsPage() {
                 onChange={(e) => set("audio_format", e.target.value)}
                 className={inputClass}
               >
-                <option value="opus">Opus (.opus)</option>
-                <option value="vorbis">Ogg Vorbis (.ogg)</option>
                 <option value="mp3">MP3 (.mp3)</option>
                 <option value="flac">FLAC (.flac)</option>
+                <option value="opus">Opus (.opus)</option>
+                <option value="vorbis">Ogg Vorbis (.ogg)</option>
                 <option value="m4a">AAC (.m4a)</option>
               </select>
             </label>
@@ -354,7 +325,6 @@ export default function SettingsPage() {
             </label>
           </div>
 
-          <SaveBar {...saveBarProps} />
         </CardContent>
       </Card>
 
@@ -384,7 +354,6 @@ export default function SettingsPage() {
               </label>
             ))}
           </div>
-          <SaveBar {...saveBarProps} />
         </CardContent>
       </Card>
 
@@ -421,9 +390,18 @@ export default function SettingsPage() {
               </span>
             </label>
           </div>
-          <SaveBar {...saveBarProps} />
         </CardContent>
       </Card>
+
+      {/* ── Floating save button ─────────────────────────────────────────────── */}
+      {isDirty && (
+        <div className="fixed bottom-6 right-6 flex items-center gap-3 bg-card border border-border rounded-lg shadow-lg px-4 py-2.5">
+          {saved && <span className="text-xs text-success">Saved</span>}
+          <Button onClick={() => mutation.mutate(form)} disabled={mutation.isPending}>
+            Save changes
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
