@@ -2,14 +2,114 @@ import {
   createContext,
   useCallback,
   useContext,
-  useRef,
+  useEffect,
   useState,
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { ImportResult, Stats } from "@/types";
+import { useWebSocketMessage } from "@/context/WebSocketContext";
+import type { Stats, WSMessage } from "@/types";
 
 const BASE = "/api";
+
+export type ImportPhase = "idle" | "scanning" | "done";
+
+export interface ImportLogEntry {
+  type: "imported" | "skipped" | "error" | "needs_review";
+  label: string;
+  albumCount?: number;
+}
+
+export interface NeedsReviewItem {
+  folder: string;
+  candidates: import("@/types").MBArtistCandidate[];
+}
+
+export interface ScanSummary {
+  artistsImported: number;
+  albumsImported: number;
+  filesLinked: number;
+  needsReviewCount: number;
+  elapsedSeconds: number;
+}
+
+export interface ImportState {
+  phase: ImportPhase;
+  scanDone: number;
+  scanTotal: number;
+  importDone: number;
+  importTotal: number;
+  currentStep: string | null;
+  log: ImportLogEntry[];
+  summary: ScanSummary | null;
+  error: string | null;
+  needsReview: NeedsReviewItem[];
+}
+
+interface ImportContextValue {
+  state: ImportState;
+  startScan: () => Promise<void>;
+  clearAll: () => Promise<void>;
+  reset: () => void;
+  importReviewItem: (folder: string, mbid: string) => Promise<void>;
+  skipReviewItem: (folder: string) => void;
+}
+
+const INITIAL: ImportState = {
+  phase: "idle",
+  scanDone: 0,
+  scanTotal: 0,
+  importDone: 0,
+  importTotal: 0,
+  currentStep: null,
+  log: [],
+  summary: null,
+  error: null,
+  needsReview: [],
+};
+
+// Convert snake_case log entry from API to camelCase
+function mapLogEntry(raw: { type: string; label: string; album_count?: number }): ImportLogEntry {
+  return {
+    type: raw.type as ImportLogEntry["type"],
+    label: raw.label,
+    albumCount: raw.album_count,
+  };
+}
+
+// Convert full backend state (snake_case) to frontend ImportState
+function mapBackendState(raw: Record<string, unknown>): ImportState {
+  const rawLog = (raw.log as { type: string; label: string; album_count?: number }[]) ?? [];
+  const rawNR = (raw.needs_review as { folder: string; candidates: import("@/types").MBArtistCandidate[] }[]) ?? [];
+  const rawSummary = raw.summary as {
+    artists_imported: number;
+    albums_imported: number;
+    files_linked: number;
+    needs_review_count: number;
+    elapsed_seconds: number;
+  } | null;
+
+  return {
+    phase: (raw.phase as ImportPhase) ?? "idle",
+    scanDone: (raw.scan_done as number) ?? 0,
+    scanTotal: (raw.scan_total as number) ?? 0,
+    importDone: (raw.import_done as number) ?? 0,
+    importTotal: (raw.import_total as number) ?? 0,
+    currentStep: (raw.current_step as string | null) ?? null,
+    log: rawLog.map(mapLogEntry),
+    needsReview: rawNR,
+    error: (raw.error as string | null) ?? null,
+    summary: rawSummary
+      ? {
+          artistsImported: rawSummary.artists_imported,
+          albumsImported: rawSummary.albums_imported,
+          filesLinked: rawSummary.files_linked,
+          needsReviewCount: rawSummary.needs_review_count,
+          elapsedSeconds: rawSummary.elapsed_seconds,
+        }
+      : null,
+  };
+}
 
 async function* consumeSSE(response: Response): AsyncGenerator<unknown> {
   const reader = response.body!.getReader();
@@ -29,149 +129,116 @@ async function* consumeSSE(response: Response): AsyncGenerator<unknown> {
   }
 }
 
-export type ImportPhase = "idle" | "scanning" | "importing" | "linking" | "done";
-
-export interface ImportLogEntry {
-  type: "imported" | "skipped" | "error";
-  label: string;
-  albumCount?: number;
-}
-
-export interface NeedsReviewItem {
-  folder: string;
-  candidates: import("@/types").MBArtistCandidate[];
-}
-
-export interface ImportState {
-  phase: ImportPhase;
-  scanDone: number;
-  scanTotal: number;
-  importDone: number;
-  importTotal: number;
-  currentStep: string | null;
-  log: ImportLogEntry[];
-  finalResult: ImportResult | null;
-  error: string | null;
-  needsReview: NeedsReviewItem[];
-}
-
-const INITIAL: ImportState = {
-  phase: "idle",
-  scanDone: 0,
-  scanTotal: 0,
-  importDone: 0,
-  importTotal: 0,
-  currentStep: null,
-  log: [],
-  finalResult: null,
-  error: null,
-  needsReview: [],
-};
-
-interface ImportContextValue {
-  state: ImportState;
-  startScan: () => void;
-  clearAll: () => Promise<void>;
-  reset: () => void;
-  importReviewItem: (folder: string, mbid: string) => Promise<void>;
-  skipReviewItem: (folder: string) => void;
-}
-
 const ImportContext = createContext<ImportContextValue | null>(null);
 
 export function ImportProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ImportState>(INITIAL);
   const queryClient = useQueryClient();
-  const abortRef = useRef<AbortController | null>(null);
+
+  // Hydrate state from backend on mount
+  useEffect(() => {
+    fetch(`${BASE}/library/scan-job`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((raw) => {
+        if (raw) setState(mapBackendState(raw as Record<string, unknown>));
+      })
+      .catch(() => {});
+  }, []);
+
+  // WebSocket-driven updates
+  useWebSocketMessage((msg: WSMessage) => {
+    switch (msg.type) {
+      case "scan_started":
+        setState((s) => ({
+          ...s,
+          phase: "scanning",
+          scanTotal: msg.total,
+          scanDone: 0,
+          importDone: 0,
+          importTotal: 0,
+          log: [],
+          needsReview: [],
+          summary: null,
+          error: null,
+          currentStep: null,
+        }));
+        break;
+
+      case "scan_progress":
+        setState((s) => ({
+          ...s,
+          scanDone: msg.scan_done,
+          scanTotal: msg.scan_total,
+          importDone: msg.import_done,
+          importTotal: msg.import_total,
+          currentStep: msg.current_step,
+        }));
+        break;
+
+      case "scan_log":
+        setState((s) => ({
+          ...s,
+          log: [...s.log, mapLogEntry(msg.entry)],
+        }));
+        // Optimistically update stats counter when an artist is successfully imported
+        if (msg.entry.type === "imported") {
+          queryClient.setQueryData<Stats>(["stats"], (old) =>
+            old
+              ? {
+                  ...old,
+                  artists: old.artists + 1,
+                  albums: old.albums + (msg.entry.album_count ?? 0),
+                }
+              : old
+          );
+        }
+        break;
+
+      case "scan_done":
+        setState((s) => ({
+          ...s,
+          phase: "done",
+          currentStep: null,
+          summary: {
+            artistsImported: msg.summary.artists_imported,
+            albumsImported: msg.summary.albums_imported,
+            filesLinked: msg.summary.files_linked,
+            needsReviewCount: msg.summary.needs_review_count,
+            elapsedSeconds: msg.summary.elapsed_seconds,
+          },
+        }));
+        queryClient.invalidateQueries({ queryKey: ["artists"] });
+        queryClient.invalidateQueries({ queryKey: ["stats"] });
+        break;
+
+      case "scan_error":
+        setState((s) => ({ ...s, phase: "idle", error: msg.error }));
+        break;
+
+      case "artist_ready":
+        // Refresh the artists list so the new artist appears live
+        queryClient.invalidateQueries({ queryKey: ["artists"] });
+        break;
+    }
+  });
 
   const startScan = useCallback(async () => {
-    abortRef.current?.abort();
-    const abort = new AbortController();
-    abortRef.current = abort;
-
-    let threshold = 80;
-    try {
-      const settingsRes = await fetch(`${BASE}/downloads/settings`);
-      if (settingsRes.ok) {
-        const s = await settingsRes.json();
-        threshold = s.scan_min_confidence ?? 80;
-      }
-    } catch {} // eslint-disable-line no-empty
-
-    setState({ ...INITIAL, phase: "scanning" });
-
-    try {
-      const res = await fetch(`${BASE}/library/scan`, { signal: abort.signal });
-      if (!res.ok) throw new Error(`Scan failed: ${res.status}`);
-
-      const artists: { mbid: string; folder: string }[] = [];
-      for await (const raw of consumeSSE(res)) {
-        if (abort.signal.aborted) return;
-        const e = raw as Record<string, unknown>;
-        if (e.type === "start") {
-          setState(s => ({ ...s, scanTotal: e.total as number }));
-        } else if (e.type === "result") {
-          const cands = e.candidates as { mbid: string; score: number; name: string; sort_name: string; disambiguation: string | null }[];
-          if (cands[0]?.score >= threshold) {
-            artists.push({ mbid: cands[0].mbid, folder: e.folder as string });
-          } else if (cands.length > 0) {
-            setState(s => ({ ...s, needsReview: [...s.needsReview, { folder: e.folder as string, candidates: cands }] }));
-          }
-          setState(s => ({ ...s, scanDone: e.done as number }));
-        }
-      }
-
-      if (!artists.length) {
-        setState(s => ({ ...s, phase: "done" }));
-        return;
-      }
-
-      setState(s => ({ ...s, phase: "importing", importTotal: artists.length }));
-
-      const importRes = await fetch(`${BASE}/library/import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ artists }),
-        signal: abort.signal,
-      });
-      if (!importRes.ok) throw new Error(`Import failed: ${importRes.status}`);
-
-      for await (const raw of consumeSSE(importRes)) {
-        if (abort.signal.aborted) return;
-        const e = raw as Record<string, unknown>;
-        if (e.type === "step") {
-          const step = e.step as string;
-          const name = (e.name ?? e.mbid) as string;
-          const label =
-            step === "artist_info" ? `${name} — fetching artist info` :
-            step === "albums"      ? `${name} — fetching album list` :
-            step === "cover_art"   ? `${name} — fetching cover art (${e.album_count} albums)` :
-            step === "tracks"      ? `${name} — fetching track listings` :
-            `${name} — ${step}`;
-          setState(s => ({ ...s, currentStep: label }));
-        } else if (e.type === "imported") {
-          const albumCount = e.album_count as number | undefined;
-          setState(s => ({ ...s, importDone: e.done as number, currentStep: null, log: [...s.log, { type: "imported", label: e.name as string, albumCount }] }));
-          queryClient.setQueryData<Stats>(["stats"], (old) =>
-            old ? { ...old, artists: old.artists + 1, albums: old.albums + (albumCount ?? 0) } : old
-          );
-        } else if (e.type === "skipped") {
-          setState(s => ({ ...s, importDone: e.done as number, currentStep: null, log: [...s.log, { type: "skipped", label: e.mbid as string }] }));
-        } else if (e.type === "error") {
-          setState(s => ({ ...s, importDone: e.done as number, currentStep: null, log: [...s.log, { type: "error", label: `${e.mbid}: ${e.error}` }] }));
-        } else if (e.type === "linking") {
-          setState(s => ({ ...s, phase: "linking" }));
-        } else if (e.type === "done") {
-          setState(s => ({ ...s, phase: "done", finalResult: e.result as ImportResult }));
-          queryClient.invalidateQueries({ queryKey: ["artists"] });
-          queryClient.invalidateQueries({ queryKey: ["stats"] });
-        }
-      }
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return;
-      setState(s => ({ ...s, phase: "idle", error: err instanceof Error ? err.message : "Failed" }));
-    }
-  }, [queryClient]);
+    // Optimistically set scanning state so the UI responds immediately,
+    // even if the WS scan_started event hasn't arrived yet.
+    setState({
+      phase: "scanning",
+      scanDone: 0,
+      scanTotal: 0,
+      importDone: 0,
+      importTotal: 0,
+      currentStep: null,
+      log: [],
+      needsReview: [],
+      summary: null,
+      error: null,
+    });
+    await fetch(`${BASE}/library/scan-job`, { method: "POST" });
+  }, []);
 
   const clearAll = useCallback(async () => {
     await fetch(`${BASE}/library/artists`, { method: "DELETE" });
@@ -187,11 +254,25 @@ export function ImportProvider({ children }: { children: ReactNode }) {
   const reset = useCallback(() => setState(INITIAL), []);
 
   const skipReviewItem = useCallback((folder: string) => {
-    setState(s => ({ ...s, needsReview: s.needsReview.filter(i => i.folder !== folder) }));
+    setState((s) => ({
+      ...s,
+      needsReview: s.needsReview.filter((i) => i.folder !== folder),
+    }));
+    // Also remove from backend state so it doesn't reappear on refresh
+    fetch(`${BASE}/library/scan-job/review-item?folder=${encodeURIComponent(folder)}`, {
+      method: "DELETE",
+    }).catch(() => {});
   }, []);
 
   const importReviewItem = useCallback(async (folder: string, mbid: string) => {
-    setState(s => ({ ...s, needsReview: s.needsReview.filter(i => i.folder !== folder) }));
+    setState((s) => ({
+      ...s,
+      needsReview: s.needsReview.filter((i) => i.folder !== folder),
+    }));
+    fetch(`${BASE}/library/scan-job/review-item?folder=${encodeURIComponent(folder)}`, {
+      method: "DELETE",
+    }).catch(() => {});
+
     try {
       const res = await fetch(`${BASE}/library/import`, {
         method: "POST",
@@ -203,9 +284,14 @@ export function ImportProvider({ children }: { children: ReactNode }) {
         const e = raw as Record<string, unknown>;
         if (e.type === "imported") {
           const albumCount = e.album_count as number | undefined;
-          setState(s => ({ ...s, log: [...s.log, { type: "imported", label: e.name as string, albumCount }] }));
+          setState((s) => ({
+            ...s,
+            log: [...s.log, { type: "imported", label: e.name as string, albumCount }],
+          }));
           queryClient.setQueryData<Stats>(["stats"], (old) =>
-            old ? { ...old, artists: old.artists + 1, albums: old.albums + (albumCount ?? 0) } : old
+            old
+              ? { ...old, artists: old.artists + 1, albums: old.albums + (albumCount ?? 0) }
+              : old
           );
           queryClient.invalidateQueries({ queryKey: ["artists"] });
         }
@@ -214,7 +300,9 @@ export function ImportProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   return (
-    <ImportContext.Provider value={{ state, startScan, clearAll, reset, importReviewItem, skipReviewItem }}>
+    <ImportContext.Provider
+      value={{ state, startScan, clearAll, reset, importReviewItem, skipReviewItem }}
+    >
       {children}
     </ImportContext.Provider>
   );

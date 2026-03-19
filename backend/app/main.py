@@ -13,6 +13,7 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.services import downloader as dl_service
 from app.services.library_watcher import start_library_watcher, stop_library_watcher
+from app.services.scan_job import scan_job_manager
 
 # ── Background download worker ─────────────────────────────────────────────────
 
@@ -60,6 +61,12 @@ async def lifespan(app: FastAPI):
     # Wire queue and cancel fn into downloads router
     downloads.set_queue(download_queue)
     downloads.set_cancel_fn(_signal_cancel)
+
+    # Wire scan job manager
+    scan_job_manager.configure(
+        broadcast=ws_manager.broadcast,
+        db_factory=AsyncSessionLocal,
+    )
 
     # Start background worker
     worker_task = asyncio.create_task(_download_worker())

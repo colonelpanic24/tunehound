@@ -12,8 +12,8 @@ interface Props {
 
 export default function Layout({ children }: Props) {
   const { state } = useImport();
-  const { phase, scanDone, scanTotal, importDone, importTotal } = state;
-  const isActive = phase === "scanning" || phase === "importing" || phase === "linking";
+  const { phase, scanDone, scanTotal, importDone } = state;
+  const isActive = phase === "scanning";
 
   const { data: stats } = useQuery({
     queryKey: ["stats"],
@@ -76,9 +76,8 @@ export default function Layout({ children }: Props) {
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="w-3 h-3 animate-spin text-primary shrink-0" />
               <span className="truncate">
-                {phase === "scanning" && `Scanning ${scanDone}/${scanTotal}`}
-                {phase === "importing" && `Importing ${importDone}/${importTotal}`}
-                {phase === "linking" && "Linking files…"}
+                {`Scanning ${scanDone}/${scanTotal}`}
+                {importDone > 0 && ` · ${importDone} imported`}
               </span>
             </div>
           </NavLink>

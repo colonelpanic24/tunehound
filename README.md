@@ -6,7 +6,7 @@ TuneHound touches on features you see in MusicBrainz Picard and Lidarr, with a t
 * Library maintenance: Tagging your music library (text metadata and artwork)
 * Library completeness: Downloading (via yt-dlp) for missing artists, albums, _or_ tracks
 
-TuneHound has limited write ability. It can write new tags and artwork to your existing music, download new tracks, and in very specific scenario, delete. The goal is to make your music library clean and complete without makin
+TuneHound has limited write ability. It can write new tags and artwork to your existing music, download new tracks, and in limited scenarios, delete. The goal is to keep the music library clean and complete without letting you accidentally blow shit up.
 
 ## Features
 

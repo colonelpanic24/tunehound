@@ -1,17 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { HardDrive, ScanLine, FileAudio } from "lucide-react";
 import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 import { useImport } from "@/context/ImportContext";
 import { ArtistSearchDialog } from "@/components/ArtistSearchDialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Card, CardContent } from "@/components/ui/card";
+
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getMissingAlbums, getOrphanedFiles } from "@/api/client";
-import type { ImportResult, MissingAlbum, OrphanedFile } from "@/types";
+import type { MissingAlbum, OrphanedFile } from "@/types";
 import AlbumCard from "@/components/AlbumCard";
 
 type Tab = "import" | "missing" | "orphaned";
@@ -25,8 +25,8 @@ function formatBytes(bytes: number): string {
 
 export default function LibraryPage() {
   const { state, startScan, clearAll, reset, importReviewItem, skipReviewItem } = useImport();
-  const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, finalResult, error, needsReview } = state;
-  const isActive = phase === "scanning" || phase === "importing" || phase === "linking";
+  const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, summary, error, needsReview } = state;
+  const isActive = phase === "scanning";
 
   const [tab, setTab] = useState<Tab>("import");
 
@@ -95,7 +95,7 @@ export default function LibraryPage() {
             importTotal={importTotal}
             currentStep={currentStep}
             log={log}
-            finalResult={finalResult}
+            summary={summary}
             error={error}
             needsReview={needsReview}
             startScan={startScan}
@@ -116,7 +116,7 @@ export default function LibraryPage() {
 
 function ImportTab({
   isActive, phase, scanDone, scanTotal, importDone, importTotal,
-  currentStep, log, finalResult, error, needsReview, startScan, clearAll, reset,
+  currentStep, log, summary, error, needsReview, startScan, clearAll, reset,
   importReviewItem, skipReviewItem,
 }: {
   isActive: boolean;
@@ -127,15 +127,25 @@ function ImportTab({
   importTotal: number;
   currentStep: string | null;
   log: import("@/context/ImportContext").ImportLogEntry[];
-  finalResult: ImportResult | null;
+  summary: import("@/context/ImportContext").ScanSummary | null;
   error: string | null;
   needsReview: import("@/context/ImportContext").NeedsReviewItem[];
   startScan: () => void;
-  clearAll: () => void;
+  clearAll: () => Promise<void>;
   reset: () => void;
   importReviewItem: (folder: string, mbid: string) => Promise<void>;
   skipReviewItem: (folder: string) => void;
 }) {
+  const [summaryVisible, setSummaryVisible] = useState(false);
+
+  useEffect(() => {
+    if (phase === "done" && summary) {
+      setSummaryVisible(true);
+      const t = setTimeout(() => setSummaryVisible(false), 12000);
+      return () => clearTimeout(t);
+    }
+  }, [phase, summary]);
+
   return (
     <div className="max-w-2xl">
       <p className="text-muted-foreground mb-6">
@@ -182,30 +192,20 @@ function ImportTab({
 
       {phase === "scanning" && (
         <div className="mt-6 space-y-2">
-          <p className="text-sm text-foreground">
-            {scanTotal === 0
-              ? "Discovering folders…"
-              : `Searching MusicBrainz — ${scanDone} / ${scanTotal}`}
-          </p>
-          {scanTotal > 0 && (
-            <Progress value={scanTotal > 0 ? Math.round((scanDone / scanTotal) * 100) : 0} />
-          )}
-        </div>
-      )}
-
-      {(phase === "importing" || phase === "linking") && (
-        <div className="mt-6 space-y-2">
-          <div className="flex items-baseline justify-between">
-            <p className="text-sm text-foreground">
-              {phase === "linking"
-                ? "Linking files on disk…"
-                : `Importing — ${importDone} / ${importTotal}`}
-            </p>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-foreground">
+              {scanTotal === 0
+                ? "Discovering folders…"
+                : `Scanning — ${scanDone} / ${scanTotal}`}
+            </span>
+            {importDone > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {importDone}{importTotal > 0 ? ` / ${importTotal}` : ""} imported
+              </span>
+            )}
           </div>
-          {phase === "importing" && (
-            <Progress
-              value={importTotal > 0 ? Math.round((importDone / importTotal) * 100) : 0}
-            />
+          {scanTotal > 0 && (
+            <Progress value={Math.round((scanDone / scanTotal) * 100)} />
           )}
           {currentStep && (
             <p className="text-xs text-muted-foreground truncate">{currentStep}</p>
@@ -214,55 +214,38 @@ function ImportTab({
         </div>
       )}
 
-      {phase === "done" && (
-        <div className="mt-6 space-y-4">
-          {finalResult && (
-            <Card>
-              <CardContent className="pt-4 space-y-2">
-                <p className="font-medium text-foreground">Import complete</p>
-                <ul className="text-sm space-y-1">
-                  <li className="text-success">
-                    {finalResult.imported.length} artist
-                    {finalResult.imported.length !== 1 ? "s" : ""} imported
-                  </li>
-                  {finalResult.skipped.length > 0 && (
-                    <li className="text-muted-foreground">
-                      {finalResult.skipped.length} already in library (skipped)
-                    </li>
-                  )}
-                  <li className="text-muted-foreground">
-                    {finalResult.files_linked} existing file
-                    {finalResult.files_linked !== 1 ? "s" : ""} linked
-                  </li>
-                  {finalResult.errors.length > 0 && (
-                    <li className="text-destructive">
-                      {finalResult.errors.length} error
-                      {finalResult.errors.length !== 1 ? "s" : ""}
-                    </li>
-                  )}
-                </ul>
-                {finalResult.errors.length > 0 && (
-                  <details className="text-xs text-destructive mt-1">
-                    <summary className="cursor-pointer">Show errors</summary>
-                    <ul className="mt-1 space-y-1">
-                      {finalResult.errors.map((e) => (
-                        <li key={e.mbid}>
-                          {e.mbid}: {e.error}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-              </CardContent>
-            </Card>
-          )}
-          {!finalResult && (
-            <p className="text-muted-foreground text-sm">No new artists found to import.</p>
-          )}
+      {phase === "done" && summaryVisible && summary && (
+        <div className="mt-6 rounded-lg border border-border bg-card px-4 py-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-foreground">Library scan complete</span>
+            <span className="text-xs text-muted-foreground">{formatElapsed(summary.elapsedSeconds)}</span>
+          </div>
+          <ul className="text-sm space-y-0.5 text-muted-foreground">
+            <li>
+              <span className="text-foreground">{summary.artistsImported}</span> artist{summary.artistsImported !== 1 ? "s" : ""} imported
+              {" · "}
+              <span className="text-foreground">{summary.albumsImported}</span> album{summary.albumsImported !== 1 ? "s" : ""}
+            </li>
+            <li><span className="text-foreground">{summary.filesLinked}</span> file{summary.filesLinked !== 1 ? "s" : ""} linked</li>
+            {summary.needsReviewCount > 0 && (
+              <li className="text-warning">
+                {summary.needsReviewCount} folder{summary.needsReviewCount !== 1 ? "s" : ""} need review
+              </li>
+            )}
+          </ul>
         </div>
+      )}
+
+      {phase === "done" && !summary && (
+        <p className="mt-6 text-muted-foreground text-sm">No new artists found.</p>
       )}
     </div>
   );
+}
+
+function formatElapsed(s: number): string {
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 // ── Missing tab ────────────────────────────────────────────────────────────────

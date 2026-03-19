@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -18,7 +18,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import type { Artist, ImportResult, OrphanedFile } from "@/types";
+import type { Artist, OrphanedFile } from "@/types";
 
 type LibTab = "import" | "orphaned";
 
@@ -39,8 +39,8 @@ export default function DashboardPage() {
   const { data: artists = [] } = useQuery({ queryKey: ["artists"], queryFn: listArtists });
 
   const { state, startScan, clearAll, reset, importReviewItem, skipReviewItem } = useImport();
-  const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, finalResult, error, needsReview } = state;
-  const importActive = phase === "scanning" || phase === "importing" || phase === "linking";
+  const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, summary, error, needsReview } = state;
+  const importActive = phase === "scanning";
 
   const orphanedQuery = useInfiniteQuery({
     queryKey: ["library-orphaned"],
@@ -190,7 +190,7 @@ export default function DashboardPage() {
               importTotal={importTotal}
               currentStep={currentStep}
               log={log}
-              finalResult={finalResult}
+              summary={summary}
               error={error}
               needsReview={needsReview}
               startScan={startScan}
@@ -275,9 +275,14 @@ function RecentArtistTile({ artist, onClick }: { artist: Artist; onClick: () => 
 
 // ── Import tab ─────────────────────────────────────────────────────────────────
 
+function formatElapsed(s: number): string {
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
 function ImportTab({
   isActive, phase, scanDone, scanTotal, importDone, importTotal,
-  currentStep, log, finalResult, error, needsReview, startScan, clearAll, reset,
+  currentStep, log, summary, error, needsReview, startScan, clearAll, reset,
   importReviewItem, skipReviewItem,
 }: {
   isActive: boolean;
@@ -288,17 +293,26 @@ function ImportTab({
   importTotal: number;
   currentStep: string | null;
   log: import("@/context/ImportContext").ImportLogEntry[];
-  finalResult: ImportResult | null;
+  summary: import("@/context/ImportContext").ScanSummary | null;
   error: string | null;
   needsReview: import("@/context/ImportContext").NeedsReviewItem[];
   startScan: () => void;
-  clearAll: () => void;
+  clearAll: () => Promise<void>;
   reset: () => void;
   importReviewItem: (folder: string, mbid: string) => Promise<void>;
   skipReviewItem: (folder: string) => void;
 }) {
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [summaryVisible, setSummaryVisible] = useState(false);
+
+  useEffect(() => {
+    if (phase === "done" && summary) {
+      setSummaryVisible(true);
+      const t = setTimeout(() => setSummaryVisible(false), 12000);
+      return () => clearTimeout(t);
+    }
+  }, [phase, summary]);
 
   const handleClearConfirm = async () => {
     setClearing(true);
@@ -366,6 +380,7 @@ function ImportTab({
 
       {error && <p className="mt-4 text-destructive text-sm">{error}</p>}
 
+      {/* Needs Review — appears as folders are found during scan, persists after */}
       {needsReview.length > 0 && (
         <div className="mt-6 space-y-3">
           <p className="text-sm font-medium text-foreground">
@@ -385,28 +400,23 @@ function ImportTab({
         </div>
       )}
 
+      {/* Active scan + concurrent import progress */}
       {phase === "scanning" && (
         <div className="mt-6 space-y-2">
-          <p className="text-sm text-foreground">
-            {scanTotal === 0
-              ? "Discovering folders…"
-              : `Searching MusicBrainz — ${scanDone} / ${scanTotal}`}
-          </p>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-foreground">
+              {scanTotal === 0
+                ? "Discovering folders…"
+                : `Scanning — ${scanDone} / ${scanTotal}`}
+            </span>
+            {importDone > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {importDone}{importTotal > 0 ? ` / ${importTotal}` : ""} imported
+              </span>
+            )}
+          </div>
           {scanTotal > 0 && (
-            <Progress value={scanTotal > 0 ? Math.round((scanDone / scanTotal) * 100) : 0} />
-          )}
-        </div>
-      )}
-
-      {(phase === "importing" || phase === "linking") && (
-        <div className="mt-6 space-y-2">
-          <p className="text-sm text-foreground">
-            {phase === "linking"
-              ? "Linking files on disk…"
-              : `Importing — ${importDone} / ${importTotal}`}
-          </p>
-          {phase === "importing" && (
-            <Progress value={importTotal > 0 ? Math.round((importDone / importTotal) * 100) : 0} />
+            <Progress value={Math.round((scanDone / scanTotal) * 100)} />
           )}
           {currentStep && (
             <p className="text-xs text-muted-foreground truncate">{currentStep}</p>
@@ -415,48 +425,31 @@ function ImportTab({
         </div>
       )}
 
-      {phase === "done" && (
-        <div className="mt-6 space-y-4">
-          {finalResult ? (
-            <Card>
-              <CardContent className="pt-4 space-y-2">
-                <p className="font-medium text-foreground">Import complete</p>
-                <ul className="text-sm space-y-1">
-                  <li className="text-success">
-                    {finalResult.imported.length} artist
-                    {finalResult.imported.length !== 1 ? "s" : ""} imported
-                  </li>
-                  {finalResult.skipped.length > 0 && (
-                    <li className="text-muted-foreground">
-                      {finalResult.skipped.length} already in library (skipped)
-                    </li>
-                  )}
-                  <li className="text-muted-foreground">
-                    {finalResult.files_linked} existing file
-                    {finalResult.files_linked !== 1 ? "s" : ""} linked
-                  </li>
-                  {finalResult.errors.length > 0 && (
-                    <li className="text-destructive">
-                      {finalResult.errors.length} error{finalResult.errors.length !== 1 ? "s" : ""}
-                    </li>
-                  )}
-                </ul>
-                {finalResult.errors.length > 0 && (
-                  <details className="text-xs text-destructive mt-1">
-                    <summary className="cursor-pointer">Show errors</summary>
-                    <ul className="mt-1 space-y-1">
-                      {finalResult.errors.map((e) => (
-                        <li key={e.mbid}>{e.mbid}: {e.error}</li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            <p className="text-muted-foreground text-sm">No new artists found to import.</p>
-          )}
+      {/* Short-lived summary card after scan completes */}
+      {phase === "done" && summaryVisible && summary && (
+        <div className="mt-6 rounded-lg border border-border bg-card px-4 py-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-foreground">Library scan complete</span>
+            <span className="text-xs text-muted-foreground">{formatElapsed(summary.elapsedSeconds)}</span>
+          </div>
+          <ul className="text-sm space-y-0.5 text-muted-foreground">
+            <li>
+              <span className="text-foreground">{summary.artistsImported}</span> artist{summary.artistsImported !== 1 ? "s" : ""} imported
+              {" · "}
+              <span className="text-foreground">{summary.albumsImported}</span> album{summary.albumsImported !== 1 ? "s" : ""}
+            </li>
+            <li><span className="text-foreground">{summary.filesLinked}</span> file{summary.filesLinked !== 1 ? "s" : ""} linked</li>
+            {summary.needsReviewCount > 0 && (
+              <li className="text-warning">
+                {summary.needsReviewCount} folder{summary.needsReviewCount !== 1 ? "s" : ""} need review
+              </li>
+            )}
+          </ul>
         </div>
+      )}
+
+      {phase === "done" && !summary && (
+        <p className="mt-6 text-muted-foreground text-sm">No new artists found.</p>
       )}
     </div>
   );
@@ -578,19 +571,21 @@ function ImportLog({ log }: { log: import("@/context/ImportContext").ImportLogEn
         {log.map((entry, i) => (
           <div key={i} className="flex items-center gap-2 text-sm py-0.5">
             <span className={cn(
-              entry.type === "imported" ? "text-success"
-                : entry.type === "skipped" ? "text-muted-foreground"
-                : "text-destructive"
+              entry.type === "imported"     ? "text-success" :
+              entry.type === "skipped"      ? "text-muted-foreground" :
+              entry.type === "needs_review" ? "text-warning" :
+              "text-destructive"
             )}>
-              {entry.type === "imported" ? "✓" : entry.type === "skipped" ? "–" : "✗"}
+              {entry.type === "imported" ? "✓" : entry.type === "skipped" ? "–" : entry.type === "needs_review" ? "⚠" : "✗"}
             </span>
             <span className={cn(
               "flex-1",
-              entry.type === "imported" ? "text-foreground"
-                : entry.type === "skipped" ? "text-muted-foreground/50"
-                : "text-destructive"
+              entry.type === "imported"     ? "text-foreground" :
+              entry.type === "skipped"      ? "text-muted-foreground/50" :
+              entry.type === "needs_review" ? "text-warning/80" :
+              "text-destructive"
             )}>
-              {entry.label}
+              {entry.type === "needs_review" ? `${entry.label} — needs review` : entry.label}
             </span>
             {entry.albumCount !== undefined && (
               <span className="text-xs text-muted-foreground shrink-0">
