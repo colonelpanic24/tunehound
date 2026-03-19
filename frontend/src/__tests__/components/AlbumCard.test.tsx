@@ -96,4 +96,43 @@ describe("AlbumCard", () => {
     );
     expect(container.firstChild).not.toHaveClass("opacity-50");
   });
+
+  it("shows artist name when showArtist is true", () => {
+    render(
+      <AlbumCard album={mockAlbum} artistName="Test Artist" showArtist />,
+      { wrapper }
+    );
+    expect(screen.getByText("Test Artist")).toBeInTheDocument();
+  });
+
+  it("hides artist name when showArtist is false", () => {
+    render(
+      <AlbumCard album={mockAlbum} artistName="Test Artist" showArtist={false} />,
+      { wrapper }
+    );
+    expect(screen.queryByText("Test Artist")).not.toBeInTheDocument();
+  });
+
+  it("shows 0% availability badge when not on disk", () => {
+    render(<AlbumCard album={mockAlbum} artistName="Test Artist" onDisk={false} />, {
+      wrapper,
+    });
+    expect(screen.getByText("0%")).toBeInTheDocument();
+  });
+
+  it("shows 100% availability badge when fully on disk", () => {
+    render(
+      <AlbumCard album={mockAlbum} artistName="Test Artist" onDisk={true} fileCount={10} />,
+      { wrapper }
+    );
+    expect(screen.getByText("100%")).toBeInTheDocument();
+  });
+
+  it("shows partial availability badge when partially on disk", () => {
+    render(
+      <AlbumCard album={mockAlbum} artistName="Test Artist" onDisk={true} fileCount={5} />,
+      { wrapper }
+    );
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
 });

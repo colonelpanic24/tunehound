@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     data_dir: str = "/data"
 
     # Download defaults (also editable via the UI, stored in DB)
-    default_download_format: str = "opus"
+    default_download_format: str = "mp3"
     default_download_delay_min: float = 5.0
     default_download_delay_max: float = 15.0
 

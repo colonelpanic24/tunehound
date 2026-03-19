@@ -58,6 +58,7 @@ export default function ArtistDetailPage() {
     },
   });
 
+  const [bioExpanded, setBioExpanded] = useState(false);
   const [matchDialogOpen, setMatchDialogOpen] = useState(false);
   const [rematchMessage, setRematchMessage] = useState<string | null>(null);
   const rematchMutation = useMutation({
@@ -119,10 +120,37 @@ export default function ArtistDetailPage() {
 
   if (artistLoading) {
     return (
-      <div className="p-6 space-y-4">
-        <div className="h-48 shimmer rounded-xl" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
+      <div>
+        {/* Hero skeleton */}
+        <div className="relative bg-card overflow-hidden px-6 pt-4 pb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-8 h-8 shimmer rounded-md" />
+            <div className="flex-1" />
+            <div className="w-32 h-7 shimmer rounded-lg" />
+            <div className="w-44 h-9 shimmer rounded-lg" />
+          </div>
+          <div className="flex items-end gap-5">
+            <div className="w-28 h-28 shimmer rounded-xl shrink-0" />
+            <div className="flex-1 pb-1 space-y-2">
+              <div className="h-8 shimmer rounded w-48" />
+              <div className="h-4 shimmer rounded w-32" />
+            </div>
+          </div>
+          <div className="mt-4 space-y-2 max-w-2xl">
+            <div className="h-3.5 shimmer rounded" />
+            <div className="h-3.5 shimmer rounded w-4/5" />
+            <div className="h-3.5 shimmer rounded w-3/5" />
+          </div>
+        </div>
+        {/* Tab bar skeleton */}
+        <div className="border-b border-border px-6 py-3 flex gap-6">
+          {[80, 64, 72, 80].map((w, i) => (
+            <div key={i} className={`h-4 shimmer rounded`} style={{ width: w }} />
+          ))}
+        </div>
+        {/* Albums skeleton */}
+        <div className="p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          {Array.from({ length: 5 }).map((_, i) => (
             <div key={i}>
               <div className="aspect-square shimmer rounded-xl" />
               <div className="h-4 shimmer rounded mt-2" />
@@ -294,9 +322,17 @@ export default function ArtistDetailPage() {
 
           {/* Bio */}
           {artist.bio && (
-            <p className="mt-4 text-sm text-muted-foreground/90 line-clamp-3 max-w-2xl leading-relaxed">
-              {artist.bio}
-            </p>
+            <div className="mt-4 max-w-2xl">
+              <p className={`text-sm text-muted-foreground/90 leading-relaxed ${bioExpanded ? "" : "line-clamp-3"}`}>
+                {artist.bio}
+              </p>
+              <button
+                onClick={() => setBioExpanded((v) => !v)}
+                className="mt-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {bioExpanded ? "Show less" : "More…"}
+              </button>
+            </div>
           )}
         </div>
       </div>

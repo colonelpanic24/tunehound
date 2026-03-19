@@ -15,6 +15,7 @@ async def test_get_settings_creates_defaults(client):
     assert "sponsorblock_remove" in data
     assert "search_query_template" in data
     assert "release_types" in data
+    assert data["audio_format"] == "mp3"
 
 
 @pytest.mark.asyncio

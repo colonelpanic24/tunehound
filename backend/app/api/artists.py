@@ -4,14 +4,13 @@ import re
 from difflib import SequenceMatcher
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.api.ws import manager as ws_manager
 from app.config import settings
 from app.database import get_db
-from app.models import Artist, DownloadSettings, ReleaseGroup
+from app.models import Artist, DownloadSettings, ReleaseGroup, Track
 from app.schemas import (
     ArtistCreate,
     ArtistDiskStatus,
@@ -286,16 +285,16 @@ async def unsubscribe_artist(
 @router.get("/{artist_id}/albums", response_model=list[ReleaseGroupOut])
 async def get_artist_albums(artist_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(ReleaseGroup)
+        select(ReleaseGroup, func.count(Track.id).label("tc"))
+        .outerjoin(Track, Track.release_group_id == ReleaseGroup.id)
         .where(ReleaseGroup.artist_id == artist_id)
-        .options(selectinload(ReleaseGroup.tracks))
+        .group_by(ReleaseGroup.id)
         .order_by(ReleaseGroup.first_release_date)
     )
-    groups = result.scalars().all()
     out = []
-    for rg in groups:
+    for rg, tc in result.all():
         d = ReleaseGroupOut.model_validate(rg)
-        d.track_count = len(rg.tracks)
+        d.track_count = tc or 0
         out.append(d)
     return out
 
@@ -308,69 +307,93 @@ async def get_artist_disk_status(artist_id: int, db: AsyncSession = Depends(get_
     if not artist:
         raise HTTPException(404, "Artist not found")
 
+    # Single JOIN query for release groups + track counts (no per-RG subqueries)
     rg_result = await db.execute(
-        select(ReleaseGroup)
+        select(ReleaseGroup, func.count(Track.id).label("tc"))
+        .outerjoin(Track, Track.release_group_id == ReleaseGroup.id)
         .where(ReleaseGroup.artist_id == artist_id)
-        .options(selectinload(ReleaseGroup.tracks))
+        .group_by(ReleaseGroup.id)
         .order_by(ReleaseGroup.first_release_date)
     )
-    rgs = rg_result.scalars().all()
+    rows = rg_result.all()
 
-    # Scan the artist's folder on disk
-    disk_folders: list[dict] = []
+    # One top-level scandir — just lists subdirectory names, no recursive file counting
+    disk_subdirs: list[dict] = []
     if artist.folder_name:
         artist_path = os.path.join(settings.music_library_path, artist.folder_name)
         if os.path.isdir(artist_path):
-            for entry in sorted(os.scandir(artist_path), key=lambda e: e.name):
-                if entry.is_dir():
-                    try:
-                        file_count = sum(1 for f in os.scandir(entry.path) if not f.is_dir())
-                    except PermissionError:
-                        file_count = 0
-                    disk_folders.append({
-                        "folder_name": entry.name,
-                        "folder_path": entry.path,
-                        "file_count": file_count,
-                    })
+            try:
+                for entry in sorted(os.scandir(artist_path), key=lambda e: e.name):
+                    if entry.is_dir():
+                        disk_subdirs.append({"folder_name": entry.name, "folder_path": entry.path})
+            except OSError:
+                pass
 
-    # Fuzzy-match each release group to the best folder
+    all_disk_paths = {f["folder_path"] for f in disk_subdirs}
+
+    # Clear stale folder_path values (folder was deleted/moved)
+    changed = False
+    for rg, _ in rows:
+        if rg.folder_path and rg.folder_path not in all_disk_paths:
+            rg.folder_path = None
+            rg.file_count = None
+            changed = True
+
+    # Fuzzy-match only release groups that still have no folder_path
     THRESHOLD = 0.65
+    known_paths = {rg.folder_path for rg, _ in rows if rg.folder_path}
+    unmatched_subdirs = [f for f in disk_subdirs if f["folder_path"] not in known_paths]
+
+    for rg, _ in rows:
+        if rg.folder_path or not unmatched_subdirs:
+            continue
+        best, best_score = None, 0.0
+        for folder in unmatched_subdirs:
+            s = _match_score(folder["folder_name"], rg.title)
+            if s > best_score:
+                best_score = s
+                best = folder
+        if best and best_score >= THRESHOLD:
+            unmatched_subdirs.remove(best)
+            try:
+                fc = sum(1 for f in os.scandir(best["folder_path"]) if not f.is_dir())
+            except OSError:
+                fc = 0
+            rg.folder_path = best["folder_path"]
+            rg.file_count = fc
+            known_paths.add(best["folder_path"])
+            changed = True
+
+    if changed:
+        await db.commit()
+
+    # Build response from stored DB values — no more disk I/O beyond what's done above
+    used_folder_paths: set[str] = set()
     matched: list[MatchedAlbum] = []
     missing: list[ReleaseGroupOut] = []
-    used_folder_paths: set[str] = set()
 
-    for rg in rgs:
+    for rg, tc in rows:
         rg_out = ReleaseGroupOut.model_validate(rg)
-        rg_out.track_count = len(rg.tracks)
-
-        best_folder = None
-        best_score = 0.0
-        for folder in disk_folders:
-            score = _match_score(folder["folder_name"], rg.title)
-            if score > best_score:
-                best_score = score
-                best_folder = folder
-
-        if best_folder and best_score >= THRESHOLD:
+        rg_out.track_count = tc or 0
+        if rg.folder_path and rg.folder_path in all_disk_paths:
+            used_folder_paths.add(rg.folder_path)
             matched.append(MatchedAlbum(
                 release_group=rg_out,
-                folder_path=best_folder["folder_path"],
-                file_count=best_folder["file_count"],
+                folder_path=rg.folder_path,
+                file_count=rg.file_count or 0,
             ))
-            used_folder_paths.add(best_folder["folder_path"])
-            # Persist the matched folder_path on the release group
-            if rg.folder_path != best_folder["folder_path"]:
-                rg.folder_path = best_folder["folder_path"]
         else:
             missing.append(rg_out)
 
-    unmatched = [
-        DiskFolder(**f) for f in disk_folders
-        if f["folder_path"] not in used_folder_paths
-    ]
-
-    # Commit any folder_path updates
-    await db.commit()
+    # Count files only for unmatched folders (typically zero or one)
+    unmatched: list[DiskFolder] = []
+    for f in disk_subdirs:
+        if f["folder_path"] not in used_folder_paths:
+            try:
+                fc = sum(1 for e in os.scandir(f["folder_path"]) if not e.is_dir())
+            except OSError:
+                fc = 0
+            unmatched.append(DiskFolder(folder_name=f["folder_name"], folder_path=f["folder_path"], file_count=fc))
 
     return ArtistDiskStatus(matched=matched, missing=missing, unmatched_folders=unmatched)
 
@@ -387,6 +410,8 @@ async def relink_artist(artist_id: int, db: AsyncSession = Depends(get_db)):
 
     artist_path = os.path.join(settings.music_library_path, artist.folder_name)
     count = await scanner.link_existing_files(artist_path, db)
+    rg_result = await db.execute(select(ReleaseGroup).where(ReleaseGroup.artist_id == artist_id))
+    await scanner.link_album_folders(artist_path, rg_result.scalars().all(), db)
     return {"files_linked": count}
 
 

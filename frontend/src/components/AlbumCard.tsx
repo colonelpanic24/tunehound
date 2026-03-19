@@ -8,15 +8,30 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
+/** Interpolates green (100%) → yellow (75%) → red (≤25%) */
+function availColor(pct: number): string {
+  const p = Math.max(0, Math.min(100, pct));
+  if (p >= 75) {
+    const t = (p - 75) / 25;
+    return `hsl(${Math.round(50 + t * 92)} 75% 45%)`;
+  }
+  if (p >= 25) {
+    const t = (p - 25) / 50;
+    return `hsl(${Math.round(t * 50)} 80% 50%)`;
+  }
+  return "hsl(0 72% 50%)";
+}
+
 interface Props {
   album: ReleaseGroup;
   artistName: string;
   onDisk?: boolean;
   fileCount?: number;
+  showArtist?: boolean;
   onDownloadQueued?: () => void;
 }
 
-export default function AlbumCard({ album, onDisk = false, fileCount, onDownloadQueued }: Props) {
+export default function AlbumCard({ album, artistName, onDisk = false, fileCount, showArtist, onDownloadQueued }: Props) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [downloadQueued, setDownloadQueued] = useState(false);
@@ -43,6 +58,13 @@ export default function AlbumCard({ album, onDisk = false, fileCount, onDownload
       queryClient.invalidateQueries({ queryKey: ["download-jobs"] });
     },
   });
+
+  const availPct =
+    fileCount !== undefined && album.track_count > 0
+      ? Math.round((fileCount / album.track_count) * 100)
+      : onDisk
+      ? 100
+      : 0;
 
   const year = album.first_release_date?.slice(0, 4) ?? "–";
   const typeLabel = [album.primary_type, ...(album.secondary_types?.split(",") ?? [])]
@@ -84,12 +106,22 @@ export default function AlbumCard({ album, onDisk = false, fileCount, onDownload
             <CircleDashed className="w-4 h-4 text-warning-foreground" />
           </div>
         )}
+        {/* Availability badge */}
+        <div
+          className="absolute bottom-2 right-2 bg-black/60 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums"
+          style={{ color: availColor(availPct) }}
+        >
+          {availPct}%
+        </div>
       </div>
 
       {/* Info */}
       <div className="p-3 flex flex-col gap-2 flex-1">
         <div className="flex-1">
           <p className="font-medium text-sm leading-tight line-clamp-2 text-foreground">{album.title}</p>
+          {showArtist && (
+            <p className="text-xs font-medium text-muted-foreground mt-0.5 truncate">{artistName}</p>
+          )}
           <p className="text-xs text-muted-foreground mt-0.5">
             {year}{typeLabel ? ` · ${typeLabel}` : ""}
             {onDisk && fileCount !== undefined && (
