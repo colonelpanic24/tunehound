@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
-  Music2, Disc3, ListMusic, HardDrive, Download, Plus, ScanLine, FileAudio, Trash2, Square,
+  Music2, Disc3, ListMusic, HardDrive, Download, Plus, ScanLine, FileAudio, Square,
 } from "lucide-react";
 import { getStats, listArtists, getOrphanedFiles } from "@/api/client";
 import AddArtistModal from "@/components/AddArtistModal";
@@ -41,7 +41,7 @@ export default function DashboardPage() {
   const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: getStats, staleTime: 30_000 });
   const { data: artists = [] } = useQuery({ queryKey: ["artists"], queryFn: listArtists });
 
-  const { state, startScan, cancelScan, clearAll, reset, importReviewItem, skipReviewItem } = useImport();
+  const { state, startScan, cancelScan, reset, importReviewItem, skipReviewItem } = useImport();
   const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, summary, error, needsReview } = state;
   const importActive = phase === "scanning";
 
@@ -198,7 +198,6 @@ export default function DashboardPage() {
               needsReview={needsReview}
               startScan={startScan}
               cancelScan={cancelScan}
-              clearAll={clearAll}
               reset={reset}
               importReviewItem={importReviewItem}
               skipReviewItem={skipReviewItem}
@@ -286,7 +285,7 @@ function formatElapsed(s: number): string {
 
 function ImportTab({
   isActive, phase, scanDone, scanTotal, importDone, importTotal,
-  currentStep, log, summary, error, needsReview, startScan, cancelScan, clearAll, reset,
+  currentStep, log, summary, error, needsReview, startScan, cancelScan, reset,
   importReviewItem, skipReviewItem,
 }: {
   isActive: boolean;
@@ -302,13 +301,10 @@ function ImportTab({
   needsReview: import("@/context/ImportContext").NeedsReviewItem[];
   startScan: () => void;
   cancelScan: () => Promise<void>;
-  clearAll: () => Promise<void>;
   reset: () => void;
   importReviewItem: (folder: string, mbid: string) => Promise<void>;
   skipReviewItem: (folder: string) => void;
 }) {
-  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const [summaryVisible, setSummaryVisible] = useState(false);
 
   useEffect(() => {
@@ -318,13 +314,6 @@ function ImportTab({
       return () => { clearTimeout(show); clearTimeout(hide); };
     }
   }, [phase, summary]);
-
-  const handleClearConfirm = async () => {
-    setClearing(true);
-    await clearAll();
-    setClearing(false);
-    setClearConfirmOpen(false);
-  };
 
   return (
     <div className="max-w-2xl">
@@ -352,45 +341,8 @@ function ImportTab({
               Clear
             </Button>
           )}
-          <Button variant="destructive" onClick={() => setClearConfirmOpen(true)} className="ml-auto">
-            Clear All Artists
-          </Button>
         </div>
       )}
-
-      <Dialog open={clearConfirmOpen} onOpenChange={(o) => { if (!o) setClearConfirmOpen(false); }}>
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>Clear all artists from the library?</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 text-sm text-muted-foreground">
-            <p>
-              This will remove all artists, albums, and track records from TuneHound's database.
-            </p>
-            <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
-              <p className="text-foreground font-medium">Your music files will not be touched.</p>
-              <p className="mt-0.5">
-                No files will be deleted from disk. You can re-import your library at any time by scanning again.
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setClearConfirmOpen(false)} disabled={clearing}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleClearConfirm} disabled={clearing}>
-              {clearing ? (
-                <span className="flex items-center gap-1.5">Clearing…</span>
-              ) : (
-                <>
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Clear library
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {error && <p className="mt-4 text-destructive text-sm">{error}</p>}
 
@@ -526,6 +478,7 @@ function OrphanedTab({ query }: { query: ReturnType<typeof useInfiniteQuery> }) 
 
 function toExpectedFolderName(artistName: string): string {
   // Mirror the Python _safe() function in downloader.py
+  // eslint-disable-next-line no-control-regex
   return artistName.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^[.\s]+|[.\s]+$/g, "");
 }
 
@@ -640,21 +593,13 @@ function NeedsReviewCard({
             <DialogFooter>
               <TooltipProvider>
                 <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" onClick={() => handleRenameChoice(false)}>
-                      No, keep as is
-                    </Button>
-                  </TooltipTrigger>
+                  <TooltipTrigger render={<Button variant="outline" onClick={() => handleRenameChoice(false)}>No, keep as is</Button>} />
                   <TooltipContent side="bottom">
                     Your directory won't be changed, but you'll have this matching issue if you ever clear and rescan your library.
                   </TooltipContent>
                 </Tooltip>
                 <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button onClick={() => handleRenameChoice(true)}>
-                      Yes, rename
-                    </Button>
-                  </TooltipTrigger>
+                  <TooltipTrigger render={<Button onClick={() => handleRenameChoice(true)}>Yes, rename</Button>} />
                   <TooltipContent side="bottom">
                     This will rename the folder on disk but won't change any music files inside it.
                   </TooltipContent>

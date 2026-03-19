@@ -4,8 +4,12 @@ import { getDownloadSettings, updateDownloadSettings } from "@/api/client";
 import type { DownloadSettings } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { useTheme } from "@/hooks/useTheme";
-import { Sun, Moon } from "lucide-react";
+import { useImport } from "@/context/ImportContext";
+import { Sun, Moon, Trash2 } from "lucide-react";
 
 
 const YT_FORMAT_PRESETS = [
@@ -27,6 +31,17 @@ const SPONSORBLOCK_CATEGORIES = [
 export default function SettingsPage() {
   const { theme, toggle } = useTheme();
   const queryClient = useQueryClient();
+  const { clearAll } = useImport();
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const handleClearConfirm = async () => {
+    setClearing(true);
+    await clearAll();
+    setClearing(false);
+    setClearConfirmOpen(false);
+  };
+
   const { data: settings } = useQuery({
     queryKey: ["download-settings"],
     queryFn: getDownloadSettings,
@@ -392,6 +407,59 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Danger zone ─────────────────────────────────────────────────────── */}
+      <Card className="border-destructive/40">
+        <CardHeader><CardTitle className="text-sm text-destructive">Danger Zone</CardTitle></CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-foreground">Clear library</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Remove all artists, albums, and tracks from TuneHound. Your music files are not affected.
+              </p>
+            </div>
+            <Button variant="destructive" size="sm" onClick={() => setClearConfirmOpen(true)}>
+              <Trash2 className="w-3.5 h-3.5" />
+              Clear library
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={clearConfirmOpen} onOpenChange={(o) => { if (!o) setClearConfirmOpen(false); }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Clear all artists from the library?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <p>
+              This will remove all artists, albums, and track records from TuneHound's database.
+            </p>
+            <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
+              <p className="text-foreground font-medium">Your music files will not be touched.</p>
+              <p className="mt-0.5">
+                No files will be deleted from disk. You can re-import your library at any time by scanning again.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClearConfirmOpen(false)} disabled={clearing}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleClearConfirm} disabled={clearing}>
+              {clearing ? (
+                <span className="flex items-center gap-1.5">Clearing…</span>
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear library
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Floating save button ─────────────────────────────────────────────── */}
       {isDirty && (

@@ -29,7 +29,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function LibraryPage() {
-  const { state, startScan, cancelScan, clearAll, reset, importReviewItem, skipReviewItem } = useImport();
+  const { state, startScan, cancelScan, reset, importReviewItem, skipReviewItem } = useImport();
   const { phase, scanDone, scanTotal, importDone, importTotal, currentStep, log, summary, error, needsReview } = state;
   const isActive = phase === "scanning";
 
@@ -105,7 +105,6 @@ export default function LibraryPage() {
             needsReview={needsReview}
             startScan={startScan}
             cancelScan={cancelScan}
-            clearAll={clearAll}
             reset={reset}
             importReviewItem={importReviewItem}
             skipReviewItem={skipReviewItem}
@@ -122,7 +121,7 @@ export default function LibraryPage() {
 
 function ImportTab({
   isActive, phase, scanDone, scanTotal, importDone, importTotal,
-  currentStep, log, summary, error, needsReview, startScan, cancelScan, clearAll, reset,
+  currentStep, log, summary, error, needsReview, startScan, cancelScan, reset,
   importReviewItem, skipReviewItem,
 }: {
   isActive: boolean;
@@ -138,7 +137,6 @@ function ImportTab({
   needsReview: import("@/context/ImportContext").NeedsReviewItem[];
   startScan: () => void;
   cancelScan: () => Promise<void>;
-  clearAll: () => Promise<void>;
   reset: () => void;
   importReviewItem: (folder: string, mbid: string) => Promise<void>;
   skipReviewItem: (folder: string) => void;
@@ -179,9 +177,6 @@ function ImportTab({
               Clear
             </Button>
           )}
-          <Button variant="destructive" onClick={clearAll} className="ml-auto">
-            Clear All Artists
-          </Button>
         </div>
       )}
 
@@ -389,6 +384,7 @@ function OrphanedTab({ query }: { query: ReturnType<typeof useInfiniteQuery> }) 
 // ── Folder rename helper ───────────────────────────────────────────────────────
 
 function toExpectedFolderName(artistName: string): string {
+  // eslint-disable-next-line no-control-regex
   return artistName.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^[.\s]+|[.\s]+$/g, "");
 }
 
@@ -513,21 +509,13 @@ function NeedsReviewCard({
             <DialogFooter>
               <TooltipProvider>
                 <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" onClick={() => handleRenameChoice(false)}>
-                      No, keep as is
-                    </Button>
-                  </TooltipTrigger>
+                  <TooltipTrigger render={<Button variant="outline" onClick={() => handleRenameChoice(false)}>No, keep as is</Button>} />
                   <TooltipContent side="bottom">
                     Your directory won't be changed, but you'll have this matching issue if you ever clear and rescan your library.
                   </TooltipContent>
                 </Tooltip>
                 <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button onClick={() => handleRenameChoice(true)}>
-                      Yes, rename
-                    </Button>
-                  </TooltipTrigger>
+                  <TooltipTrigger render={<Button onClick={() => handleRenameChoice(true)}>Yes, rename</Button>} />
                   <TooltipContent side="bottom">
                     This will rename the folder on disk but won't change any music files inside it.
                   </TooltipContent>
