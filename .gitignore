@@ -26,3 +26,5 @@ frontend/dist/
 
 # Editor
 .vscode/
+# Generated screenshots (run scripts/seed_screenshots.py + capture_screenshots.py to regenerate)
+docs/screenshots/*.png
