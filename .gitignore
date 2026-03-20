@@ -15,6 +15,7 @@ __pycache__/
 # Node
 node_modules/
 frontend/dist/
+backend/static/
 
 # DB / data
 *.db
@@ -26,3 +27,5 @@ frontend/dist/
 
 # Editor
 .vscode/
+# Generated screenshots (run scripts/seed_screenshots.py + capture_screenshots.py to regenerate)
+docs/screenshots/*.png

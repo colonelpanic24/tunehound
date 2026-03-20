@@ -1,15 +1,14 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { HardDrive, Music2, Download, Disc3, Loader2, Settings, ChevronsLeft, ChevronsRight } from "lucide-react";
-
-
-
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useImport } from "@/context/ImportContext";
-import { getStats } from "@/api/client";
+import { getStats, listArtists, listAlbums } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
+const STALE_MS = 60_000;
 
 interface Props {
   children: ReactNode;
@@ -17,7 +16,13 @@ interface Props {
 
 export default function Layout({ children }: Props) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { state } = useImport();
+
+  const prefetchLists = () => {
+    queryClient.prefetchQuery({ queryKey: ["artists"], queryFn: listArtists, staleTime: STALE_MS });
+    queryClient.prefetchQuery({ queryKey: ["albums"],  queryFn: listAlbums,  staleTime: STALE_MS });
+  };
   const { phase, scanDone, scanTotal, importDone, importTotal } = state;
   const isActive = phase === "scanning";
 
@@ -58,14 +63,12 @@ export default function Layout({ children }: Props) {
 
         {/* Nav items */}
         <div className="flex flex-col gap-0.5 px-2 flex-1">
-          <NavItem to="/" icon={<HardDrive className="w-5 h-5" />} end collapsed={collapsed}>
-            Library
-          </NavItem>
           <NavItem
             to="/artists"
             icon={<Music2 className="w-5 h-5" />}
             count={stats?.artists}
             collapsed={collapsed}
+            onMouseEnter={prefetchLists}
           >
             Artists
           </NavItem>
@@ -74,8 +77,12 @@ export default function Layout({ children }: Props) {
             icon={<Disc3 className="w-5 h-5" />}
             count={stats?.albums}
             collapsed={collapsed}
+            onMouseEnter={prefetchLists}
           >
             Albums
+          </NavItem>
+          <NavItem to="/" icon={<HardDrive className="w-5 h-5" />} end collapsed={collapsed}>
+            Library
           </NavItem>
           <NavItem
             to="/downloads"
@@ -180,6 +187,7 @@ function NavItem({
   end,
   count,
   collapsed,
+  onMouseEnter,
 }: {
   to: string;
   icon: ReactNode;
@@ -187,11 +195,13 @@ function NavItem({
   end?: boolean;
   count?: number | string;
   collapsed?: boolean;
+  onMouseEnter?: () => void;
 }) {
   const link = (
     <NavLink
       to={to}
       end={end}
+      onMouseEnter={onMouseEnter}
       className={({ isActive }) =>
         cn(
           "flex items-center rounded-md font-medium transition-colors",
