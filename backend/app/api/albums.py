@@ -97,6 +97,9 @@ async def list_albums(
             q = q.where(and_(*avail_conds))
         q = q.order_by(*orders).offset(offset).limit(limit)
         items = (await db.execute(q)).scalars().all()
+        # description is deferred; set None explicitly to prevent async lazy-load
+        for item in items:
+            item.__dict__.setdefault("description", None)
 
         return AlbumsPage(items=items, total=total, counts=counts)
 
