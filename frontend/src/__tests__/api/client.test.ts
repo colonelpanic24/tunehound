@@ -52,7 +52,7 @@ describe("listAlbums", () => {
 
     await listAlbums();
     expect(fetch).toHaveBeenCalledWith(
-      "/api/albums",
+      "/api/albums?",
       expect.anything()
     );
   });

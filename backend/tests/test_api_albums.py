@@ -8,7 +8,10 @@ from tests.conftest import seed_artist, seed_release_group, seed_track
 async def test_list_albums_empty(client):
     r = await client.get("/api/albums")
     assert r.status_code == 200
-    assert r.json() == []
+    data = r.json()
+    assert data["items"] == []
+    assert data["total"] == 0
+    assert data["counts"]["all"] == 0
 
 
 @pytest.mark.asyncio
@@ -23,8 +26,11 @@ async def test_list_albums_returns_all(client, db_session):
 
     r = await client.get("/api/albums")
     assert r.status_code == 200
-    titles = {a["title"] for a in r.json()}
+    data = r.json()
+    titles = {a["title"] for a in data["items"]}
     assert titles == {"Album A", "Album B"}
+    assert data["total"] == 2
+    assert data["counts"]["all"] == 2
 
 
 @pytest.mark.asyncio

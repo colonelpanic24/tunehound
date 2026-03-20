@@ -442,6 +442,7 @@ async def seed(db: AsyncSession) -> None:
 
         artist_rgs: list[ReleaseGroup] = []
         for album_data in artist_data["albums"]:
+            on_disk = album_data.get("on_disk", False)
             rg = ReleaseGroup(
                 mbid=album_data["mbid"],
                 artist_id=artist.id,
@@ -450,6 +451,10 @@ async def seed(db: AsyncSession) -> None:
                 first_release_date=album_data.get("first_release_date"),
                 cover_art_url=album_data.get("cover_art_url"),
                 file_count=album_data.get("file_count"),
+                folder_path=(
+                    f"/music/{artist_data['folder_name']}/{album_data['title']}"
+                    if on_disk else None
+                ),
                 tracks_fetched=True,
                 watched=True,
             )
@@ -457,7 +462,6 @@ async def seed(db: AsyncSession) -> None:
             await db.flush()
             artist_rgs.append(rg)
 
-            on_disk = album_data.get("on_disk", False)
             for title, number, duration in album_data["tracks"]:
                 track = Track(
                     release_group_id=rg.id,

@@ -1,7 +1,7 @@
 import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer, selectinload
 
@@ -41,6 +41,7 @@ async def list_albums(
     from collections import defaultdict
 
     from sqlalchemy import and_, case, distinct, func
+
     from app.models import Artist
     from app.schemas import AlbumCounts, AlbumGroup, AlbumGroupsPage, AlbumsPage
 
@@ -96,6 +97,9 @@ async def list_albums(
             q = q.where(and_(*avail_conds))
         q = q.order_by(*orders).offset(offset).limit(limit)
         items = (await db.execute(q)).scalars().all()
+        # description is deferred; set None explicitly to prevent async lazy-load
+        for item in items:
+            item.__dict__.setdefault("description", None)
 
         return AlbumsPage(items=items, total=total, counts=counts)
 
