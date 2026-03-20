@@ -35,6 +35,7 @@ When the user says "ready for a new release", "cut a release", "make a PR", or s
    - If a major new feature was added that has no screenshot, add a new entry to `PAGES` in `capture_screenshots.py` and include it in the README.
    - If a feature or page was removed, delete the corresponding screenshot file and remove it from the README.
    - Run ESLint (`npx eslint src/`) before taking screenshots to catch any lint errors that would cause CI to fail.
+   - Screenshots use the demo database seeded by `scripts/seed_screenshots.py`. If screenshots show availability, make sure the seed data has `on_disk: True` for a realistic mix of albums so availability bars/percentages are non-zero. The `folder_path` on each `ReleaseGroup` is what drives availability in the UI — the seed sets it automatically for `on_disk: True` albums.
 7. **Version bump** — increment the version (patch for bug fixes, minor for new features). Do NOT increment the major version without consulting the user first.
 8. **Branch + commit + push** — create a new feature/release branch, commit all changes with a clear message, and push to remote.
 9. **Pull request** — open a PR against main using `gh pr create`.
