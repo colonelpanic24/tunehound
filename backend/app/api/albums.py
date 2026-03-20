@@ -1,7 +1,7 @@
 import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer, selectinload
 
@@ -41,6 +41,7 @@ async def list_albums(
     from collections import defaultdict
 
     from sqlalchemy import and_, case, distinct, func
+
     from app.models import Artist
     from app.schemas import AlbumCounts, AlbumGroup, AlbumGroupsPage, AlbumsPage
 
