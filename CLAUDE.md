@@ -31,7 +31,11 @@ When the user says "ready for a new release", "cut a release", "make a PR", or s
 3. **Lint** — run `ruff check` on all changed backend files and `npx tsc --noEmit` on the frontend. Fix any violations before running tests.
 4. **Run tests** — run the full test suite and get all tests passing before proceeding.
 5. **Docs** — update the README and any inline code comments that are now stale or missing context.
-6. **Version bump** — increment the version (patch for bug fixes, minor for new features). Do NOT increment the major version without consulting the user first.
-7. **Branch + commit + push** — create a new feature/release branch, commit all changes with a clear message, and push to remote.
-8. **Pull request** — open a PR against main using `gh pr create`.
-9. **CI** — after posting the PR, keep polling `gh run list --branch <branch>` until the build is green. Fix any CI failures before considering the release done.
+6. **Screenshots** — if any frontend pages changed, retake screenshots using `backend/.venv/bin/python3 scripts/capture_screenshots.py` (assumes dev servers are already running on their default ports). Also:
+   - If a major new feature was added that has no screenshot, add a new entry to `PAGES` in `capture_screenshots.py` and include it in the README.
+   - If a feature or page was removed, delete the corresponding screenshot file and remove it from the README.
+   - Run ESLint (`npx eslint src/`) before taking screenshots to catch any lint errors that would cause CI to fail.
+7. **Version bump** — increment the version (patch for bug fixes, minor for new features). Do NOT increment the major version without consulting the user first.
+8. **Branch + commit + push** — create a new feature/release branch, commit all changes with a clear message, and push to remote.
+9. **Pull request** — open a PR against main using `gh pr create`.
+10. **CI** — after posting the PR, keep polling `gh run list --branch <branch>` until the build is green. Fix any CI failures before considering the release done.
