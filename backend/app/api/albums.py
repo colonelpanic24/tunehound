@@ -144,6 +144,7 @@ async def list_albums(
 
         albums_by_artist: dict[int, list] = defaultdict(list)
         for album in all_albums:
+            album.__dict__.setdefault("description", None)
             albums_by_artist[album.artist_id].append(album)
 
         groups = [

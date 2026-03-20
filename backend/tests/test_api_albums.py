@@ -34,6 +34,109 @@ async def test_list_albums_returns_all(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_list_albums_pagination(client, db_session):
+    artist = await seed_artist(db_session)
+    for i in range(5):
+        await seed_release_group(
+            db_session, artist_id=artist.id,
+            title=f"Album {i}",
+            mbid=f"rg00000{i}-0000-0000-0000-000000000001",
+        )
+
+    r = await client.get("/api/albums?offset=0&limit=2")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["items"]) == 2
+    assert data["total"] == 5
+
+    r2 = await client.get("/api/albums?offset=2&limit=2")
+    assert r2.status_code == 200
+    data2 = r2.json()
+    assert len(data2["items"]) == 2
+    # No overlap between pages
+    titles1 = {a["title"] for a in data["items"]}
+    titles2 = {a["title"] for a in data2["items"]}
+    assert titles1.isdisjoint(titles2)
+
+
+@pytest.mark.asyncio
+async def test_list_albums_search(client, db_session):
+    artist = await seed_artist(db_session)
+    await seed_release_group(db_session, artist_id=artist.id, title="Parklife",
+                             mbid="rg000001-0000-0000-0000-000000000001")
+    await seed_release_group(db_session, artist_id=artist.id, title="Modern Life Is Rubbish",
+                             mbid="rg000002-0000-0000-0000-000000000002")
+
+    r = await client.get("/api/albums?search=park")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert data["items"][0]["title"] == "Parklife"
+
+
+@pytest.mark.asyncio
+async def test_list_albums_avail_filter(client, db_session):
+    artist = await seed_artist(db_session)
+    await seed_release_group(db_session, artist_id=artist.id, title="On Disk",
+                             mbid="rg000001-0000-0000-0000-000000000001",
+                             folder_path="/music/artist/on-disk")
+    await seed_release_group(db_session, artist_id=artist.id, title="Missing",
+                             mbid="rg000002-0000-0000-0000-000000000002")
+
+    r = await client.get("/api/albums?avail=on-disk")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert data["items"][0]["title"] == "On Disk"
+
+    r2 = await client.get("/api/albums?avail=missing")
+    assert r2.status_code == 200
+    data2 = r2.json()
+    assert data2["total"] == 1
+    assert data2["items"][0]["title"] == "Missing"
+
+
+@pytest.mark.asyncio
+async def test_list_albums_counts_reflect_avail(client, db_session):
+    artist = await seed_artist(db_session)
+    await seed_release_group(db_session, artist_id=artist.id, title="On Disk",
+                             mbid="rg000001-0000-0000-0000-000000000001",
+                             folder_path="/music/artist/on-disk")
+    await seed_release_group(db_session, artist_id=artist.id, title="Missing",
+                             mbid="rg000002-0000-0000-0000-000000000002")
+
+    r = await client.get("/api/albums")
+    counts = r.json()["counts"]
+    assert counts["all"] == 2
+    assert counts["on_disk"] == 1
+    assert counts["missing"] == 1
+
+
+@pytest.mark.asyncio
+async def test_list_albums_grouped(client, db_session):
+    artist1 = await seed_artist(db_session, name="Artist One",
+                                mbid="a1000000-0000-0000-0000-000000000001")
+    artist2 = await seed_artist(db_session, name="Artist Two",
+                                mbid="a2000000-0000-0000-0000-000000000002")
+    await seed_release_group(db_session, artist_id=artist1.id, title="Album A",
+                             mbid="rg000001-0000-0000-0000-000000000001")
+    await seed_release_group(db_session, artist_id=artist1.id, title="Album B",
+                             mbid="rg000002-0000-0000-0000-000000000002")
+    await seed_release_group(db_session, artist_id=artist2.id, title="Album C",
+                             mbid="rg000003-0000-0000-0000-000000000003")
+
+    r = await client.get("/api/albums?grouped=true")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 2  # 2 artists
+    assert len(data["items"]) == 2
+    artist_names = {g["artist_name"] for g in data["items"]}
+    assert artist_names == {"Artist One", "Artist Two"}
+    group1 = next(g for g in data["items"] if g["artist_name"] == "Artist One")
+    assert len(group1["albums"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_get_album_not_found(client):
     r = await client.get("/api/albums/9999")
     assert r.status_code == 404

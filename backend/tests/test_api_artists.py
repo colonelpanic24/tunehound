@@ -173,3 +173,38 @@ async def test_subscribe_artist_duplicate_is_handled(client, db_session, mocker)
     r = await client.post("/api/artists", json={"mbid": mbid, "name": "Test Artist"})
     # Should either succeed (returning existing) or 409 — not 500
     assert r.status_code in (200, 201, 409)
+
+
+@pytest.mark.asyncio
+async def test_subscribe_artist_shared_release_group_mbid(client, db_session, mocker):
+    """Subscribing two artists that share a release group MBID (e.g. soundtracks)
+    should not raise a UNIQUE constraint error on the second subscribe."""
+    shared_rg_mbid = "rg-shared-0000-0000-0000-000000000001"
+    shared_release = {
+        "id": shared_rg_mbid,
+        "title": "Shared Soundtrack",
+        "primary-type": "Album",
+        "secondary-type-list": [],
+        "first-release-date": "2020-01-01",
+    }
+
+    def _make_artist_mocks(mocker, mbid: str, name: str):
+        mocker.patch("app.api.artists.mb.get_artist", return_value={
+            "name": name, "sort-name": name, "disambiguation": None, "url-relation-list": []
+        })
+        mocker.patch("app.api.artists.mb.get_artist_image_url", return_value=None)
+        mocker.patch("app.api.artists.mb.get_release_groups", return_value=[shared_release])
+        mocker.patch("app.api.artists.mb.get_release_group_description", return_value=None)
+        mocker.patch("app.api.artists.mb.get_artist_bio", return_value=None)
+        mocker.patch("app.api.artists.artwork_svc.find_local_artist_image", return_value=None)
+        mocker.patch("app.api.artists._fetch_cover_art_for_artist", return_value=None)
+        mocker.patch("app.services.coverart.get_cover_art_url", return_value=None)
+
+    _make_artist_mocks(mocker, "aaaa0001-0000-0000-0000-000000000001", "Artist One")
+    r1 = await client.post("/api/artists", json={"mbid": "aaaa0001-0000-0000-0000-000000000001", "name": "Artist One"})
+    assert r1.status_code in (200, 201)
+
+    _make_artist_mocks(mocker, "aaaa0002-0000-0000-0000-000000000002", "Artist Two")
+    r2 = await client.post("/api/artists", json={"mbid": "aaaa0002-0000-0000-0000-000000000002", "name": "Artist Two"})
+    # Must not crash with 500 / UNIQUE constraint error
+    assert r2.status_code in (200, 201)
