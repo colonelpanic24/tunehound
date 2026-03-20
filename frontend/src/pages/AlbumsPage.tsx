@@ -138,9 +138,6 @@ export default function AlbumsPage() {
   const totalShown = grouped
     ? groupItems.reduce((s, g) => s + g.albums.length, 0)
     : flatItems.length;
-  const totalAvail = grouped
-    ? (groupedQuery.data?.pages[0]?.total ?? 0)
-    : (flatQuery.data?.pages[0]?.total ?? 0);
   const needle = debouncedSearch;
 
   return (
