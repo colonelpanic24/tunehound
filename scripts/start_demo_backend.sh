@@ -19,6 +19,14 @@ export DATA_DIR="$DEMO_DATA_DIR"
 export DATABASE_URL="sqlite+aiosqlite:///$DEMO_DATA_DIR/tunehound.db"
 export MUSIC_LIBRARY_PATH="/music"
 
+# Build frontend and copy into backend/static so the demo server can serve it
+echo "Building frontend..."
+(cd frontend && npm run build --silent)
+rm -rf backend/static
+cp -r frontend/dist backend/static
+echo "Frontend built."
+echo ""
+
 echo "Starting demo backend on http://localhost:$PORT"
 echo "  DATA_DIR=$DATA_DIR"
 echo ""
