@@ -25,6 +25,15 @@ TuneHound has limited write ability. It can write new tags and artwork to your e
 - SponsorBlock support, cookies for YouTube Premium, proxy support
 
 
+## Screenshots
+
+![Artists grid](docs/screenshots/artists.png)
+![Artist detail](docs/screenshots/artist-detail.png)
+![Albums grid](docs/screenshots/albums.png)
+![Album detail](docs/screenshots/album-detail.png)
+![Library / Import](docs/screenshots/library.png)
+![Downloads](docs/screenshots/downloads.png)
+
 ## Is this AI slop?
 
 Yes. Don't use it.

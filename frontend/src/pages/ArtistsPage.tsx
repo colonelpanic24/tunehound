@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Plus, UserX, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, UserX, ArrowUp, ArrowDown, Search, X } from "lucide-react";
 import { listArtists, listAlbums, unsubscribeArtist } from "@/api/client";
 import AddArtistModal from "@/components/AddArtistModal";
 import type { Artist } from "@/types";
@@ -40,6 +40,7 @@ function availColor(pct: number): string {
 export default function ArtistsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [folderNotice, setFolderNotice] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const [field, setField] = useState<ArtistSortField>(
     () => (localStorage.getItem("artistList.sortField") as ArtistSortField) ?? "name"
   );
@@ -50,6 +51,7 @@ export default function ArtistsPage() {
   const { data: artists = [], isLoading } = useQuery({
     queryKey: ["artists"],
     queryFn: listArtists,
+    staleTime: 60_000,
   });
 
   const { data: albums = [] } = useQuery({
@@ -58,31 +60,58 @@ export default function ArtistsPage() {
     staleTime: 60_000,
   });
 
-  // availability: fraction of albums on disk per artist (0–1)
-  const availMap = new Map<number, number>();
-  for (const artist of artists) {
-    const artistAlbums = albums.filter((a) => a.artist_id === artist.id);
-    availMap.set(
-      artist.id,
-      artistAlbums.length === 0
-        ? 0
-        : artistAlbums.filter((a) => a.folder_path !== null).length / artistAlbums.length
-    );
-  }
+  const needle = search.trim().toLowerCase();
 
-  const sorted = [...artists].sort((a, b) => {
-    let cmp = 0;
-    if (field === "name")  cmp = (a.sort_name ?? a.name).localeCompare(b.sort_name ?? b.name);
-    if (field === "added") cmp = a.created_at.localeCompare(b.created_at);
-    if (field === "avail") cmp = (availMap.get(a.id) ?? 0) - (availMap.get(b.id) ?? 0);
-    return dir === "desc" ? -cmp : cmp;
-  });
+  const availMap = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const artist of artists) {
+      const artistAlbums = albums.filter((a) => a.artist_id === artist.id);
+      map.set(
+        artist.id,
+        artistAlbums.length === 0
+          ? 0
+          : artistAlbums.filter((a) => a.folder_path !== null).length / artistAlbums.length
+      );
+    }
+    return map;
+  }, [artists, albums]);
+
+  const sorted = useMemo(() => {
+    const base = needle ? artists.filter((a) => a.name.toLowerCase().includes(needle)) : artists;
+    const copy = [...base];
+    copy.sort((a, b) => {
+      let cmp = 0;
+      if (field === "name")  cmp = (a.sort_name ?? a.name).localeCompare(b.sort_name ?? b.name);
+      if (field === "added") cmp = a.created_at.localeCompare(b.created_at);
+      if (field === "avail") cmp = (availMap.get(a.id) ?? 0) - (availMap.get(b.id) ?? 0);
+      return dir === "desc" ? -cmp : cmp;
+    });
+    return copy;
+  }, [artists, needle, field, dir, availMap]);
 
   const setSort = (f: ArtistSortField, d: SortDir) => {
     setField(f); setDir(d);
     localStorage.setItem("artistList.sortField", f);
     localStorage.setItem("artistList.sortDir", d);
   };
+
+  const PAGE_SIZE = 96;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [field, dir, needle]);
+  // Cap visible count at actual result count so sentinel disappears when exhausted
+  const cappedVisible = Math.min(visibleCount, sorted.length);
+
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadMore = useCallback(() => setVisibleCount((n) => n + PAGE_SIZE), []);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) loadMore();
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loadMore]);
 
   useEffect(() => {
     if (!folderNotice) return;
@@ -95,6 +124,25 @@ export default function ArtistsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-foreground">Artists</h1>
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            <input
+              type="search"
+              placeholder="Filter artists…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="text-sm bg-muted border border-border rounded-md pl-8 pr-8 py-1.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-48"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
           <select
             value={field}
             onChange={(e) => setSort(e.target.value as ArtistSortField, dir)}
@@ -157,15 +205,28 @@ export default function ArtistsPage() {
           <p className="text-sm mt-1">Click "Add Artist" to subscribe to your first artist.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {sorted.map((artist) => (
-            <ArtistCard
-              key={artist.id}
-              artist={artist}
-              availability={availMap.get(artist.id) ?? 0}
-            />
-          ))}
-        </div>
+        <>
+          {sorted.length === 0 ? (
+            <p className="text-muted-foreground text-sm py-12 text-center">
+              No artists match "{search}".
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {sorted.slice(0, cappedVisible).map((artist) => (
+                  <ArtistCard
+                    key={artist.id}
+                    artist={artist}
+                    availability={availMap.get(artist.id) ?? 0}
+                  />
+                ))}
+              </div>
+              {cappedVisible < sorted.length && (
+                <div ref={sentinelRef} className="h-8 mt-4" />
+              )}
+            </>
+          )}
+        </>
       )}
 
       {showAdd && (

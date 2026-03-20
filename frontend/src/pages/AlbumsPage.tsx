@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Disc3, ArrowUp, ArrowDown } from "lucide-react";
+import { Disc3, ArrowUp, ArrowDown, Search, X, LayoutList, LayoutGrid } from "lucide-react";
 import { listAlbums, listArtists } from "@/api/client";
 import AlbumSection from "@/components/AlbumSection";
 import AlbumCard from "@/components/AlbumCard";
@@ -12,31 +12,54 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { ReleaseGroup } from "@/types";
 
 type Tab = "all" | "on-disk" | "missing";
-type AlbumSortField = "artist" | "date" | "title" | "avail";
+type AlbumSortField = "date" | "title" | "avail";
 type SortDir = "asc" | "desc";
 
 const SORT_FIELDS: { value: AlbumSortField; label: string }[] = [
-  { value: "artist", label: "Artist" },
   { value: "date",   label: "Release date" },
   { value: "title",  label: "Title" },
   { value: "avail",  label: "Availability" },
 ];
 
 const DIR_LABELS: Record<AlbumSortField, { asc: string; desc: string }> = {
-  artist: { asc: "A → Z",       desc: "Z → A" },
   date:   { asc: "Oldest first", desc: "Newest first" },
   title:  { asc: "A → Z",       desc: "Z → A" },
   avail:  { asc: "Missing first", desc: "On disk first" },
 };
 
+const PAGE_SIZE = 96; // divisible by 2, 3, 4, 6 — fits every grid column count cleanly
+
+/** Observes a sentinel element and calls onVisible each time it enters the viewport.
+ *  The observer is created once — the callback is kept in a ref so it stays current
+ *  without causing the observer to reconnect on every render. */
+function useSentinel(onVisible: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  const cbRef = useRef(onVisible);
+  cbRef.current = onVisible;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) cbRef.current();
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []); // empty deps — observer lives for the component lifetime
+  return ref;
+}
+
 export default function AlbumsPage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("all");
+  const [search, setSearch] = useState("");
   const [field, setField] = useState<AlbumSortField>(
-    () => (localStorage.getItem("albumList.sortField") as AlbumSortField) ?? "artist"
+    () => (localStorage.getItem("albumList.sortField") as AlbumSortField) ?? "date"
   );
   const [dir, setDir] = useState<SortDir>(
     () => (localStorage.getItem("albumList.sortDir") as SortDir) ?? "asc"
+  );
+  const [grouped, setGrouped] = useState(
+    () => localStorage.getItem("albumList.grouped") !== "false"
   );
   const [watchedOnly, setWatchedOnly] = useState(
     () => localStorage.getItem("albumList.watchedOnly") === "true"
@@ -53,21 +76,42 @@ export default function AlbumsPage() {
     queryFn: listArtists,
   });
 
-  const artistMap = Object.fromEntries(artists.map((a) => [a.id, a]));
+  const artistMap = useMemo(
+    () => Object.fromEntries(artists.map((a) => [a.id, a])),
+    [artists]
+  );
 
-  const base = watchedOnly ? albums.filter((a) => a.watched) : albums;
-  const filtered =
-    tab === "on-disk"
-      ? base.filter((a) => a.folder_path !== null)
-      : tab === "missing"
-      ? base.filter((a) => a.folder_path === null)
-      : base;
+  const needle = search.trim().toLowerCase();
 
-  const counts = {
+  const base = useMemo(
+    () => (watchedOnly ? albums.filter((a) => a.watched) : albums),
+    [albums, watchedOnly]
+  );
+
+  const tabFiltered = useMemo(
+    () =>
+      tab === "on-disk"
+        ? base.filter((a) => a.folder_path !== null)
+        : tab === "missing"
+        ? base.filter((a) => a.folder_path === null)
+        : base,
+    [base, tab]
+  );
+
+  const filtered = useMemo(
+    () =>
+      needle ? tabFiltered.filter((a) => a.title.toLowerCase().includes(needle)) : tabFiltered,
+    [tabFiltered, needle]
+  );
+
+  const counts = useMemo(() => ({
     all: base.length,
     "on-disk": base.filter((a) => a.folder_path !== null).length,
     missing: base.filter((a) => a.folder_path === null).length,
-  };
+  }), [base]);
+
+  // Reset visible windows when search or filters change
+  useEffect(() => { setVisibleFlat(PAGE_SIZE); setVisibleGroups(PAGE_SIZE); }, [needle]);
 
   const setSort = (f: AlbumSortField, d: SortDir) => {
     setField(f); setDir(d);
@@ -75,28 +119,53 @@ export default function AlbumsPage() {
     localStorage.setItem("albumList.sortDir", d);
   };
 
-  const isGroupedByArtist = field === "artist";
+  const sortedFlat = useMemo(() => {
+    const copy = [...filtered];
+    copy.sort((a, b) => {
+      let cmp = 0;
+      if (field === "date")  cmp = (a.first_release_date ?? "").localeCompare(b.first_release_date ?? "");
+      if (field === "title") cmp = a.title.localeCompare(b.title);
+      if (field === "avail") cmp = (a.folder_path !== null ? 1 : 0) - (b.folder_path !== null ? 1 : 0);
+      return dir === "desc" ? -cmp : cmp;
+    });
+    return copy;
+  }, [filtered, field, dir]);
 
-  const sortedFlat = [...filtered].sort((a, b) => {
-    let cmp = 0;
-    if (field === "date")  cmp = (a.first_release_date ?? "").localeCompare(b.first_release_date ?? "");
-    if (field === "title") cmp = a.title.localeCompare(b.title);
-    if (field === "avail") cmp = (a.folder_path !== null ? 1 : 0) - (b.folder_path !== null ? 1 : 0);
-    return dir === "desc" ? -cmp : cmp;
-  });
+  const sortedGroups = useMemo(() => {
+    const groups = new Map<number, ReleaseGroup[]>();
+    for (const album of filtered) {
+      if (!groups.has(album.artist_id)) groups.set(album.artist_id, []);
+      groups.get(album.artist_id)!.push(album);
+    }
+    return [...groups.entries()].sort(([aId], [bId]) => {
+      const a = artistMap[aId]?.sort_name ?? artistMap[aId]?.name ?? "";
+      const b = artistMap[bId]?.sort_name ?? artistMap[bId]?.name ?? "";
+      const cmp = a.localeCompare(b);
+      return dir === "desc" ? -cmp : cmp;
+    });
+  }, [filtered, artistMap, dir]);
 
-  // Grouped by artist (for "artist" field)
-  const groups = new Map<number, ReleaseGroup[]>();
-  for (const album of filtered) {
-    if (!groups.has(album.artist_id)) groups.set(album.artist_id, []);
-    groups.get(album.artist_id)!.push(album);
-  }
-  const sortedGroups = [...groups.entries()].sort(([aId], [bId]) => {
-    const a = artistMap[aId]?.sort_name ?? artistMap[aId]?.name ?? "";
-    const b = artistMap[bId]?.sort_name ?? artistMap[bId]?.name ?? "";
-    const cmp = a.localeCompare(b);
-    return dir === "desc" ? -cmp : cmp;
-  });
+  // ── Incremental rendering ──────────────────────────────────────────────────
+  // Instead of mounting all cards at once, start with PAGE_SIZE items and add
+  // more as the user scrolls to the bottom sentinel. This keeps initial render
+  // fast even with 1000+ albums.
+
+  const [visibleFlat, setVisibleFlat] = useState(PAGE_SIZE);
+  const [visibleGroups, setVisibleGroups] = useState(PAGE_SIZE);
+
+  // Reset window whenever the filtered / sorted set changes
+  useEffect(() => { setVisibleFlat(PAGE_SIZE); }, [tab, field, dir, watchedOnly, grouped]);
+  useEffect(() => { setVisibleGroups(PAGE_SIZE); }, [tab, dir, watchedOnly, grouped]);
+
+  const flatSentinelRef = useSentinel(() =>
+    setVisibleFlat((n) => Math.min(n + PAGE_SIZE, sortedFlat.length))
+  );
+  const groupSentinelRef = useSentinel(() =>
+    setVisibleGroups((n) => Math.min(n + PAGE_SIZE, sortedGroups.length))
+  );
+
+  const visibleFlatItems = sortedFlat.slice(0, visibleFlat);
+  const visibleGroupItems = sortedGroups.slice(0, visibleGroups);
 
   return (
     <div className="flex flex-col min-h-full">
@@ -129,6 +198,25 @@ export default function AlbumsPage() {
             </TabsList>
           </Tabs>
           <div className="pb-2 flex items-center gap-3">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+              <input
+                type="search"
+                placeholder="Filter albums…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="text-sm bg-muted border border-border rounded-md pl-8 pr-8 py-1.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-48"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
             <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -142,30 +230,54 @@ export default function AlbumsPage() {
               Watched only
             </label>
             <div className="flex items-center gap-1">
-              <select
-                value={field}
-                onChange={(e) => setSort(e.target.value as AlbumSortField, dir)}
-                aria-label="Sort by"
-                className="text-sm bg-muted border border-border rounded-md px-3 py-1.5 text-foreground focus:outline-none focus:border-primary"
-              >
-                {SORT_FIELDS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              {!grouped && (
+                <>
+                  <select
+                    value={field}
+                    onChange={(e) => setSort(e.target.value as AlbumSortField, dir)}
+                    aria-label="Sort by"
+                    className="text-sm bg-muted border border-border rounded-md px-3 py-1.5 text-foreground focus:outline-none focus:border-primary"
+                  >
+                    {SORT_FIELDS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="icon-sm"
+                          aria-label={DIR_LABELS[field][dir]}
+                          onClick={() => setSort(field, dir === "asc" ? "desc" : "asc")}
+                        />
+                      }
+                    >
+                      {dir === "asc" ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+                    </TooltipTrigger>
+                    <TooltipContent>{DIR_LABELS[field][dir]}</TooltipContent>
+                  </Tooltip>
+                </>
+              )}
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <Button
-                      variant="outline"
+                      variant={grouped ? "default" : "outline"}
                       size="icon-sm"
-                      aria-label={DIR_LABELS[field][dir]}
-                      onClick={() => setSort(field, dir === "asc" ? "desc" : "asc")}
+                      aria-label={grouped ? "Show flat list" : "Group by artist"}
+                      onClick={() => {
+                        setGrouped((g) => {
+                          localStorage.setItem("albumList.grouped", String(!g));
+                          return !g;
+                        });
+                      }}
                     />
                   }
                 >
-                  {dir === "asc" ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+                  {grouped ? <LayoutList className="w-4 h-4" /> : <LayoutGrid className="w-4 h-4" />}
                 </TooltipTrigger>
-                <TooltipContent>{DIR_LABELS[field][dir]}</TooltipContent>
+                <TooltipContent>{grouped ? "Show flat grid" : "Group by artist"}</TooltipContent>
               </Tooltip>
             </div>
           </div>
@@ -185,11 +297,15 @@ export default function AlbumsPage() {
           </div>
         ) : filtered.length === 0 ? (
           <p className="text-muted-foreground text-sm py-12 text-center">
-            {tab === "missing" ? "Nothing missing — you have everything!" : "No albums found."}
+            {needle
+              ? `No albums match "${search}".`
+              : tab === "missing"
+              ? "Nothing missing — you have everything!"
+              : "No albums found."}
           </p>
-        ) : isGroupedByArtist ? (
+        ) : grouped ? (
           <div className="space-y-10">
-            {sortedGroups.map(([artistId, artistAlbums]) => {
+            {visibleGroupItems.map(([artistId, artistAlbums]) => {
               const artist = artistMap[artistId];
               return (
                 <section key={artistId}>
@@ -221,19 +337,27 @@ export default function AlbumsPage() {
                 </section>
               );
             })}
+            {visibleGroups < sortedGroups.length && (
+              <div ref={groupSentinelRef} className="h-8" />
+            )}
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {sortedFlat.map((album) => (
-              <AlbumCard
-                key={album.id}
-                album={album}
-                artistName={artistMap[album.artist_id]?.name ?? ""}
-                onDisk={album.folder_path !== null}
-                showArtist
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {visibleFlatItems.map((album) => (
+                <AlbumCard
+                  key={album.id}
+                  album={album}
+                  artistName={artistMap[album.artist_id]?.name ?? ""}
+                  onDisk={album.folder_path !== null}
+                  showArtist
+                />
+              ))}
+            </div>
+            {visibleFlat < sortedFlat.length && (
+              <div ref={flatSentinelRef} className="h-8 mt-4" />
+            )}
+          </>
         )}
       </div>
     </div>

@@ -84,9 +84,8 @@ async def capture() -> None:
 
             await page.goto(url)
             try:
-                await page.wait_for_selector(
-                    f":text('{spec['wait_for']}')",
-                    timeout=10_000,
+                await page.get_by_text(spec["wait_for"], exact=False).first.wait_for(
+                    state="visible", timeout=10_000
                 )
             except Exception:
                 print(f"    Warning: '{spec['wait_for']}' not found — screenshot may be empty")
