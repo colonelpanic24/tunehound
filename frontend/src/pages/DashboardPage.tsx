@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -779,35 +778,33 @@ function NeedsReviewCard({
 function ImportLog({ log }: { log: import("@/context/ImportContext").ImportLogEntry[] }) {
   if (!log.length) return null;
   return (
-    <ScrollArea className="max-h-52 mt-2">
-      <div className="space-y-0.5">
-        {log.map((entry, i) => (
-          <div key={i} className="flex items-center gap-2 text-sm py-0.5">
-            <span className={cn(
-              entry.type === "imported"     ? "text-success" :
-              entry.type === "skipped"      ? "text-muted-foreground" :
-              entry.type === "needs_review" ? "text-warning" :
-              "text-destructive"
-            )}>
-              {entry.type === "imported" ? "✓" : entry.type === "skipped" ? "–" : entry.type === "needs_review" ? "⚠" : "✗"}
+    <div className="max-h-52 overflow-y-auto mt-2 space-y-0.5">
+      {log.map((entry, i) => (
+        <div key={i} className="flex items-center gap-2 text-sm py-0.5">
+          <span className={cn(
+            entry.type === "imported"     ? "text-success" :
+            entry.type === "skipped"      ? "text-muted-foreground" :
+            entry.type === "needs_review" ? "text-warning" :
+            "text-destructive"
+          )}>
+            {entry.type === "imported" ? "✓" : entry.type === "skipped" ? "–" : entry.type === "needs_review" ? "⚠" : "✗"}
+          </span>
+          <span className={cn(
+            "flex-1",
+            entry.type === "imported"     ? "text-foreground" :
+            entry.type === "skipped"      ? "text-muted-foreground/50" :
+            entry.type === "needs_review" ? "text-warning/80" :
+            "text-destructive"
+          )}>
+            {entry.type === "needs_review" ? `${entry.label} — needs review` : entry.label}
+          </span>
+          {entry.albumCount !== undefined && (
+            <span className="text-xs text-muted-foreground shrink-0">
+              {entry.albumCount} album{entry.albumCount !== 1 ? "s" : ""}
             </span>
-            <span className={cn(
-              "flex-1",
-              entry.type === "imported"     ? "text-foreground" :
-              entry.type === "skipped"      ? "text-muted-foreground/50" :
-              entry.type === "needs_review" ? "text-warning/80" :
-              "text-destructive"
-            )}>
-              {entry.type === "needs_review" ? `${entry.label} — needs review` : entry.label}
-            </span>
-            {entry.albumCount !== undefined && (
-              <span className="text-xs text-muted-foreground shrink-0">
-                {entry.albumCount} album{entry.albumCount !== 1 ? "s" : ""}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    </ScrollArea>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }

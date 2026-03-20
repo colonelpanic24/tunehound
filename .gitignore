@@ -27,3 +27,6 @@ backend/static/
 
 # Editor
 .vscode/
+
+# Claude Code — never commit
+CLAUDE.md

@@ -406,6 +406,16 @@ class ScanJobManager:
                             for t in g.get("secondary-type-list", [])
                         )
                     ]
+                    # Deduplicate by MBID — the API can return duplicates across
+                    # pages if the result set changes between requests.
+                    seen_mbids: set[str] = set()
+                    mb_groups_deduped = []
+                    for g in mb_groups:
+                        if g["id"] not in seen_mbids:
+                            seen_mbids.add(g["id"])
+                            mb_groups_deduped.append(g)
+                    mb_groups = mb_groups_deduped
+
                     release_groups = []
                     for mg in mb_groups:
                         secondary = mg.get("secondary-type-list", [])
@@ -431,7 +441,10 @@ class ScanJobManager:
                         {"type": "scan_progress", **self._progress_snapshot()}
                     )
 
-                    async def _fetch_cover(rg: ReleaseGroup) -> None:
+                    async def _fetch_cover(
+                        rg_mbid: str, rg_title: str
+                    ) -> tuple[str | None, str | None]:
+                        """Return (cover_art_url, cover_art_hash) without touching the ORM session."""
                         try:
                             if folder_name:
                                 _artist_path = os.path.join(
@@ -451,7 +464,7 @@ class ScanJobManager:
                                                 score = SequenceMatcher(
                                                     None,
                                                     entry.name.lower(),
-                                                    rg.title.lower(),
+                                                    rg_title.lower(),
                                                 ).ratio()
                                                 if score >= 0.6:
                                                     ext = (
@@ -470,34 +483,36 @@ class ScanJobManager:
                                                     )
                                                     dest = os.path.join(
                                                         dest_dir,
-                                                        f"{rg.mbid}.{ext}",
+                                                        f"{rg_mbid}.{ext}",
                                                     )
                                                     try:
                                                         shutil.copy2(
                                                             local_cover, dest
                                                         )
-                                                        rg.cover_art_url = f"/images/covers/{rg.mbid}.{ext}"
-                                                        rg.cover_art_hash = compute_art_hash_from_cover_file(
-                                                            rg.cover_art_url
-                                                        )
+                                                        url = f"/images/covers/{rg_mbid}.{ext}"
+                                                        return url, compute_art_hash_from_cover_file(url)
                                                     except Exception:
                                                         pass
-                                                    return
-                            remote_url = await get_cover_art_url(rg.mbid)
+                                                    return None, None
+                            remote_url = await get_cover_art_url(rg_mbid)
                             if remote_url:
-                                rg.cover_art_url = await cache_image(
-                                    "covers", rg.mbid, remote_url
-                                )
-                                if rg.cover_art_url:
-                                    rg.cover_art_hash = (
-                                        compute_art_hash_from_cover_file(
-                                            rg.cover_art_url
-                                        )
-                                    )
+                                url = await cache_image("covers", rg_mbid, remote_url)
+                                if url:
+                                    return url, compute_art_hash_from_cover_file(url)
                         except Exception:
                             pass
+                        return None, None
 
-                    await asyncio.gather(*[_fetch_cover(rg) for rg in release_groups])
+                    # Fetch all cover art concurrently, then apply results to ORM objects
+                    # in one place — avoids mutating session-tracked objects from within
+                    # concurrent coroutines, which can confuse SQLAlchemy's unit-of-work.
+                    cover_results = await asyncio.gather(
+                        *[_fetch_cover(rg.mbid, rg.title) for rg in release_groups]
+                    )
+                    for rg, (url, art_hash) in zip(release_groups, cover_results):
+                        if url:
+                            rg.cover_art_url = url
+                            rg.cover_art_hash = art_hash
                     await db.commit()
 
                     # ── tracks ────────────────────────────────────────────────

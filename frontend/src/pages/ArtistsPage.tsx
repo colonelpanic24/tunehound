@@ -65,7 +65,7 @@ export default function ArtistsPage() {
   const availMap = useMemo(() => {
     const map = new Map<number, number>();
     for (const artist of artists) {
-      const artistAlbums = albums.filter((a) => a.artist_id === artist.id);
+      const artistAlbums = albums.filter((a) => a.artist_id === artist.id && a.watched);
       map.set(
         artist.id,
         artistAlbums.length === 0
