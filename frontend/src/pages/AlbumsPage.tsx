@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Disc3, ArrowUp, ArrowDown, Search, X, LayoutList, LayoutGrid } from "lucide-react";
@@ -35,7 +35,7 @@ const PAGE_SIZE = 96; // divisible by 2, 3, 4, 6 — fits every grid column coun
 function useSentinel(onVisible: () => void) {
   const ref = useRef<HTMLDivElement>(null);
   const cbRef = useRef(onVisible);
-  cbRef.current = onVisible;
+  useLayoutEffect(() => { cbRef.current = onVisible; });
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -110,8 +110,8 @@ export default function AlbumsPage() {
     missing: base.filter((a) => a.folder_path === null).length,
   }), [base]);
 
-  // Reset visible windows when search or filters change
-  useEffect(() => { setVisibleFlat(PAGE_SIZE); setVisibleGroups(PAGE_SIZE); }, [needle]);
+  const [visibleFlat, setVisibleFlat] = useState(PAGE_SIZE);
+  const [visibleGroups, setVisibleGroups] = useState(PAGE_SIZE);
 
   const setSort = (f: AlbumSortField, d: SortDir) => {
     setField(f); setDir(d);
@@ -149,13 +149,6 @@ export default function AlbumsPage() {
   // Instead of mounting all cards at once, start with PAGE_SIZE items and add
   // more as the user scrolls to the bottom sentinel. This keeps initial render
   // fast even with 1000+ albums.
-
-  const [visibleFlat, setVisibleFlat] = useState(PAGE_SIZE);
-  const [visibleGroups, setVisibleGroups] = useState(PAGE_SIZE);
-
-  // Reset window whenever the filtered / sorted set changes
-  useEffect(() => { setVisibleFlat(PAGE_SIZE); }, [tab, field, dir, watchedOnly, grouped]);
-  useEffect(() => { setVisibleGroups(PAGE_SIZE); }, [tab, dir, watchedOnly, grouped]);
 
   const flatSentinelRef = useSentinel(() =>
     setVisibleFlat((n) => Math.min(n + PAGE_SIZE, sortedFlat.length))

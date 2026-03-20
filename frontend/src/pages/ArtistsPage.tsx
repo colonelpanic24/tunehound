@@ -97,7 +97,6 @@ export default function ArtistsPage() {
 
   const PAGE_SIZE = 96;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [field, dir, needle]);
   // Cap visible count at actual result count so sentinel disappears when exhausted
   const cappedVisible = Math.min(visibleCount, sorted.length);
 
