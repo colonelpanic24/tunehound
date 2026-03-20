@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useImport } from "@/context/ImportContext";
-import { getStats, listArtists, listAlbums } from "@/api/client";
+import { getStats, listArtists } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -21,7 +21,6 @@ export default function Layout({ children }: Props) {
 
   const prefetchLists = () => {
     queryClient.prefetchQuery({ queryKey: ["artists"], queryFn: listArtists, staleTime: STALE_MS });
-    queryClient.prefetchQuery({ queryKey: ["albums"],  queryFn: listAlbums,  staleTime: STALE_MS });
   };
   const { phase, scanDone, scanTotal, importDone, importTotal } = state;
   const isActive = phase === "scanning";
@@ -51,18 +50,30 @@ export default function Layout({ children }: Props) {
           collapsed ? "w-16" : "w-60"
         )}
       >
-        {/* Logo */}
-        <div className={cn("flex items-center py-6 px-4", collapsed ? "justify-center" : "gap-3")}>
-          <Music2 className="w-9 h-9 text-primary shrink-0" />
+        {/* Header: collapse toggle + logo */}
+        <div className={cn("flex items-center py-5 px-3", collapsed ? "justify-center" : "gap-2")}>
+          <button
+            onClick={toggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors p-1.5 shrink-0"
+          >
+            {collapsed
+              ? <ChevronsRight className="w-5 h-5" />
+              : <ChevronsLeft  className="w-5 h-5" />
+            }
+          </button>
           {!collapsed && (
-            <span className="text-3xl font-bold tracking-tight text-foreground whitespace-nowrap overflow-hidden">
-              TuneHound
-            </span>
+            <>
+              <Music2 className="w-7 h-7 text-primary shrink-0" />
+              <span className="text-2xl font-bold tracking-tight text-foreground whitespace-nowrap overflow-hidden">
+                TuneHound
+              </span>
+            </>
           )}
         </div>
 
-        {/* Nav items */}
-        <div className="flex flex-col gap-0.5 px-2 flex-1">
+        {/* Nav items — scrolls if viewport is too short */}
+        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5 px-2">
           <NavItem
             to="/artists"
             icon={<Music2 className="w-5 h-5" />}
@@ -81,7 +92,7 @@ export default function Layout({ children }: Props) {
           >
             Albums
           </NavItem>
-          <NavItem to="/" icon={<HardDrive className="w-5 h-5" />} end collapsed={collapsed}>
+          <NavItem to="/library" icon={<HardDrive className="w-5 h-5" />} collapsed={collapsed}>
             Library
           </NavItem>
           <NavItem
@@ -98,78 +109,64 @@ export default function Layout({ children }: Props) {
           </NavItem>
         </div>
 
-        {/* Bottom: settings + collapse toggle */}
+        {/* Bottom: scan progress + Settings */}
         <div className="px-2 pb-2 flex flex-col gap-0.5">
+          {isActive && (
+            <div
+              onClick={() => navigate("/library")}
+              className={cn(
+                "mx-0 mb-1 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition-colors cursor-pointer",
+                collapsed && "flex justify-center px-0"
+              )}
+            >
+              {collapsed ? (
+                <Tooltip>
+                  <TooltipTrigger className="cursor-help">
+                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {scanDone < scanTotal && `Scanning ${scanDone} / ${scanTotal} folders`}
+                    {importTotal > 0 && ` · Importing ${importDone} / ${importTotal}`}
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <>
+                  {scanDone < scanTotal && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-0.5">
+                      <Tooltip>
+                        <TooltipTrigger className="cursor-help shrink-0">
+                          <Loader2 className="w-3 h-3 animate-spin text-primary" />
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-56">
+                          Searching each music folder by name on MusicBrainz to find the matching artist.
+                          MusicBrainz enforces a 1 request/second rate limit, so this takes roughly 1 second per folder.
+                        </TooltipContent>
+                      </Tooltip>
+                      <span>Scanning {scanDone} / {scanTotal} folders</span>
+                    </div>
+                  )}
+                  {importTotal > 0 && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Tooltip>
+                        <TooltipTrigger className="w-3 h-3 flex items-center justify-center shrink-0 cursor-help">
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-56">
+                          Fetching each artist's full profile from MusicBrainz: biography, discography, album artwork,
+                          and track listings. Each artist requires several API calls and takes 30–90 seconds to complete.
+                        </TooltipContent>
+                      </Tooltip>
+                      <span>Importing {importDone} / {importTotal} artists</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           <NavItem to="/settings" icon={<Settings className="w-5 h-5" />} collapsed={collapsed}>
             Settings
           </NavItem>
-
-          <button
-            onClick={toggle}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={cn(
-              "flex items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors px-3 py-2.5",
-              collapsed ? "justify-center" : "gap-3"
-            )}
-          >
-            {collapsed
-              ? <ChevronsRight className="w-5 h-5 shrink-0" />
-              : <ChevronsLeft  className="w-5 h-5 shrink-0" />
-            }
-          </button>
         </div>
-
-        {/* Scan/import progress */}
-        {isActive && (
-          <div
-            onClick={() => navigate("/")}
-            className={cn(
-              "mx-2 mb-3 px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition-colors cursor-pointer",
-              collapsed && "flex justify-center px-0"
-            )}
-          >
-            {collapsed ? (
-              <Tooltip>
-                <TooltipTrigger className="cursor-help">
-                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  Scanning {scanDone} / {scanTotal} folders
-                  {importTotal > 0 && ` · Importing ${importDone} / ${importTotal}`}
-                </TooltipContent>
-              </Tooltip>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground mb-0.5">
-                  <Tooltip>
-                    <TooltipTrigger className="cursor-help shrink-0">
-                      <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-56">
-                      Searching each music folder by name on MusicBrainz to find the matching artist.
-                      MusicBrainz enforces a 1 request/second rate limit, so this takes roughly 1 second per folder.
-                    </TooltipContent>
-                  </Tooltip>
-                  <span>Scanning {scanDone} / {scanTotal} folders</span>
-                </div>
-                {importTotal > 0 && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Tooltip>
-                      <TooltipTrigger className="w-3 h-3 flex items-center justify-center shrink-0 cursor-help">
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-56">
-                        Fetching each artist's full profile from MusicBrainz: biography, discography, album artwork,
-                        and track listings. Each artist requires several API calls and takes 30–90 seconds to complete.
-                      </TooltipContent>
-                    </Tooltip>
-                    <span>Importing {importDone} / {importTotal} artists</span>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
       </nav>
 
       {/* Main content */}

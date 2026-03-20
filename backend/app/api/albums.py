@@ -1,9 +1,9 @@
 import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 
 from app.config import settings
 from app.database import get_db
@@ -26,15 +26,134 @@ from app.services.tagger import compute_art_hash_from_cover_file
 router = APIRouter(prefix="/albums", tags=["albums"])
 
 
-@router.get("", response_model=list[ReleaseGroupOut])
-async def list_albums(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(ReleaseGroup).order_by(
-            ReleaseGroup.first_release_date.desc().nulls_last(),
-            ReleaseGroup.title,
-        )
+@router.get("")
+async def list_albums(
+    offset: int = 0,
+    limit: int = 96,
+    sort: str = "date",
+    dir: str = "desc",
+    avail: str = "all",
+    search: str = "",
+    watched_only: bool = False,
+    grouped: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    from collections import defaultdict
+
+    from sqlalchemy import and_, case, distinct, func
+    from app.models import Artist
+    from app.schemas import AlbumCounts, AlbumGroup, AlbumGroupsPage, AlbumsPage
+
+    limit = min(limit, 200)
+
+    # ── Filter conditions ──────────────────────────────────────────────────────
+    base_conds = []
+    if search:
+        base_conds.append(ReleaseGroup.title.ilike(f"%{search}%"))
+    if watched_only:
+        base_conds.append(ReleaseGroup.watched.is_(True))
+
+    avail_conds = list(base_conds)
+    if avail == "on-disk":
+        avail_conds.append(ReleaseGroup.folder_path.isnot(None))
+    elif avail == "missing":
+        avail_conds.append(ReleaseGroup.folder_path.is_(None))
+
+    # ── Tab counts (base filters only, not avail) ──────────────────────────────
+    counts_q = select(
+        func.count(ReleaseGroup.id).label("total"),
+        func.count(ReleaseGroup.folder_path).label("on_disk"),
     )
-    return result.scalars().all()
+    if base_conds:
+        counts_q = counts_q.where(and_(*base_conds))
+    counts_row = (await db.execute(counts_q)).one()
+    counts = AlbumCounts(
+        all=counts_row.total,
+        on_disk=counts_row.on_disk,
+        missing=counts_row.total - counts_row.on_disk,
+    )
+
+    if not grouped:
+        # ── Flat paginated albums ──────────────────────────────────────────────
+        total_q = select(func.count(ReleaseGroup.id))
+        if avail_conds:
+            total_q = total_q.where(and_(*avail_conds))
+        total = (await db.execute(total_q)).scalar_one()
+
+        avail_expr = case((ReleaseGroup.folder_path.isnot(None), 1), else_=0)
+        sort_map: dict[str, list] = {
+            "date_asc":   [ReleaseGroup.first_release_date.asc().nulls_last(),  ReleaseGroup.title.asc()],
+            "date_desc":  [ReleaseGroup.first_release_date.desc().nulls_last(), ReleaseGroup.title.asc()],
+            "title_asc":  [ReleaseGroup.title.asc()],
+            "title_desc": [ReleaseGroup.title.desc()],
+            "avail_asc":  [avail_expr.asc(),  ReleaseGroup.first_release_date.desc().nulls_last()],
+            "avail_desc": [avail_expr.desc(), ReleaseGroup.first_release_date.desc().nulls_last()],
+        }
+        orders = sort_map.get(f"{sort}_{dir}", sort_map["date_desc"])
+
+        q = select(ReleaseGroup).options(defer(ReleaseGroup.description))
+        if avail_conds:
+            q = q.where(and_(*avail_conds))
+        q = q.order_by(*orders).offset(offset).limit(limit)
+        items = (await db.execute(q)).scalars().all()
+
+        return AlbumsPage(items=items, total=total, counts=counts)
+
+    else:
+        # ── Grouped by artist (paginate by artist) ─────────────────────────────
+        total_q = select(func.count(distinct(ReleaseGroup.artist_id)))
+        if avail_conds:
+            total_q = total_q.where(and_(*avail_conds))
+        total = (await db.execute(total_q)).scalar_one()
+
+        sort_key = func.coalesce(Artist.sort_name, Artist.name)
+        artist_ids_q = (
+            select(ReleaseGroup.artist_id)
+            .join(Artist, Artist.id == ReleaseGroup.artist_id)
+            .group_by(ReleaseGroup.artist_id)
+            .order_by(sort_key.asc() if dir == "asc" else sort_key.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        if avail_conds:
+            artist_ids_q = artist_ids_q.where(and_(*avail_conds))
+        artist_id_rows = (await db.execute(artist_ids_q)).all()
+        artist_ids_ordered = [r[0] for r in artist_id_rows]
+
+        if not artist_ids_ordered:
+            return AlbumGroupsPage(items=[], total=total, counts=counts)
+
+        artists_result = await db.execute(
+            select(Artist).where(Artist.id.in_(artist_ids_ordered))
+        )
+        artists_by_id: dict[int, Artist] = {a.id: a for a in artists_result.scalars().all()}
+
+        albums_q = (
+            select(ReleaseGroup)
+            .options(defer(ReleaseGroup.description))
+            .where(ReleaseGroup.artist_id.in_(artist_ids_ordered))
+            .order_by(ReleaseGroup.first_release_date.desc().nulls_last())
+        )
+        if avail_conds:
+            albums_q = albums_q.where(and_(*avail_conds))
+        all_albums = (await db.execute(albums_q)).scalars().all()
+
+        albums_by_artist: dict[int, list] = defaultdict(list)
+        for album in all_albums:
+            albums_by_artist[album.artist_id].append(album)
+
+        groups = [
+            AlbumGroup(
+                artist_id=aid,
+                artist_name=artists_by_id[aid].name,
+                artist_sort_name=artists_by_id[aid].sort_name,
+                artist_image_url=artists_by_id[aid].image_url,
+                albums=[ReleaseGroupOut.model_validate(a) for a in albums_by_artist[aid]],
+            )
+            for aid in artist_ids_ordered
+            if aid in artists_by_id and albums_by_artist[aid]
+        ]
+        return AlbumGroupsPage(items=groups, total=total, counts=counts)
 
 
 @router.get("/{album_id}", response_model=ReleaseGroupOut)

@@ -171,8 +171,17 @@ async def import_library(body: ImportRequest):
                         g for g in mb_groups
                         if not any(t in _EXCLUDED_SECONDARY for t in g.get("secondary-type-list", []))
                     ]
+                    existing_rg = await db.execute(
+                        select(ReleaseGroup.mbid).where(
+                            ReleaseGroup.mbid.in_([mg["id"] for mg in mb_groups])
+                        )
+                    )
+                    existing_rg_mbids = {row[0] for row in existing_rg}
+
                     release_groups = []
                     for mg in mb_groups:
+                        if mg["id"] in existing_rg_mbids:
+                            continue
                         secondary = mg.get("secondary-type-list", [])
                         rg = ReleaseGroup(
                             mbid=mg["id"],

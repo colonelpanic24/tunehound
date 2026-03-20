@@ -82,7 +82,8 @@ export default function App() {
     <Layout>
       <DownloadSyncEffect />
       <Routes>
-        <Route path="/" element={<DashboardPage />} />
+        <Route path="/" element={<Navigate to="/artists" replace />} />
+        <Route path="/library" element={<DashboardPage />} />
         <Route path="/artists" element={<ArtistsPage />} />
         <Route path="/artists/:id" element={<ArtistDetailPage />} />
         <Route path="/albums" element={<AlbumsPage />} />

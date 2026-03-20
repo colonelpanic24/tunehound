@@ -118,8 +118,36 @@ async def get_artist_thumb(mbid: str):
 
 @router.get("", response_model=list[ArtistOut])
 async def list_artists(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Artist).order_by(Artist.sort_name))
-    return result.scalars().all()
+    total_subq = (
+        select(func.count(ReleaseGroup.id))
+        .where(ReleaseGroup.artist_id == Artist.id)
+        .correlate(Artist)
+        .scalar_subquery()
+    )
+    on_disk_subq = (
+        select(func.count(ReleaseGroup.id))
+        .where(
+            ReleaseGroup.artist_id == Artist.id,
+            ReleaseGroup.folder_path.isnot(None),
+        )
+        .correlate(Artist)
+        .scalar_subquery()
+    )
+    result = await db.execute(
+        select(
+            Artist,
+            total_subq.label("album_count"),
+            on_disk_subq.label("on_disk_count"),
+        ).order_by(Artist.sort_name)
+    )
+    rows = result.all()
+    out = []
+    for row in rows:
+        artist = row[0]
+        artist.album_count = row[1]
+        artist.on_disk_count = row[2]
+        out.append(ArtistOut.model_validate(artist))
+    return out
 
 
 @router.get("/{artist_id}", response_model=ArtistOut)
@@ -210,7 +238,16 @@ async def _enrich_artist(artist_id: int) -> None:
         except Exception:
             mb_groups = []
 
+        existing_rg = await session.execute(
+            select(ReleaseGroup.mbid).where(
+                ReleaseGroup.mbid.in_([mg["id"] for mg in mb_groups])
+            )
+        )
+        existing_rg_mbids = {row[0] for row in existing_rg}
+
         for mg in mb_groups:
+            if mg["id"] in existing_rg_mbids:
+                continue
             secondary = mg.get("secondary-type-list", [])
             rg = ReleaseGroup(
                 mbid=mg["id"],
@@ -465,8 +502,17 @@ async def rematch_artist(
     mb_groups = await mb.get_release_groups(body.mbid, languages=lang_codes or None, release_types=rel_types or None)
     mb_groups = [g for g in mb_groups if not any(t in _EXCLUDED_SECONDARY for t in g.get("secondary-type-list", []))]
 
+    existing_rg = await db.execute(
+        select(ReleaseGroup.mbid).where(
+            ReleaseGroup.mbid.in_([mg["id"] for mg in mb_groups])
+        )
+    )
+    existing_rg_mbids = {row[0] for row in existing_rg}
+
     release_groups = []
     for mg in mb_groups:
+        if mg["id"] in existing_rg_mbids:
+            continue
         secondary = mg.get("secondary-type-list", [])
         rg = ReleaseGroup(
             mbid=mg["id"],

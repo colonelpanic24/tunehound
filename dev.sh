@@ -31,6 +31,10 @@ tmux send-keys -t "$SESSION:0" "cd '$REPO/backend' && ([ ! -d .venv ] && python3
 tmux new-window -t "$SESSION" -n "frontend"
 tmux send-keys -t "$SESSION:1" "cd '$REPO/frontend' && npm install --silent && npm run dev" Enter
 
+# Open browser once the frontend dev server is ready
+tmux new-window -t "$SESSION" -n "browser"
+tmux send-keys -t "$SESSION:2" "echo 'Waiting for frontend...'; until curl -s http://localhost:5174 > /dev/null; do sleep 1; done; xdg-open http://localhost:5174; tmux kill-window -t '$SESSION:2'" Enter
+
 tmux select-window -t "$SESSION:0"
 
 # prefix+R to restart: detaches and reruns this script in the original terminal

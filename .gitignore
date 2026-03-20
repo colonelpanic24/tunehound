@@ -27,6 +27,6 @@ backend/static/
 
 # Editor
 .vscode/
-
-# Claude Code — never commit
 CLAUDE.md
+# Generated screenshots (run scripts/seed_screenshots.py + capture_screenshots.py to regenerate)
+docs/screenshots/*.png

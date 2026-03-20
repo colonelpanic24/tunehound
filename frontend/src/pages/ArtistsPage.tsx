@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Plus, UserX, ArrowUp, ArrowDown, Search, X } from "lucide-react";
-import { listArtists, listAlbums, unsubscribeArtist } from "@/api/client";
+import { listArtists, unsubscribeArtist } from "@/api/client";
 import AddArtistModal from "@/components/AddArtistModal";
 import type { Artist } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -54,27 +54,18 @@ export default function ArtistsPage() {
     staleTime: 60_000,
   });
 
-  const { data: albums = [] } = useQuery({
-    queryKey: ["albums"],
-    queryFn: listAlbums,
-    staleTime: 60_000,
-  });
-
   const needle = search.trim().toLowerCase();
 
   const availMap = useMemo(() => {
     const map = new Map<number, number>();
     for (const artist of artists) {
-      const artistAlbums = albums.filter((a) => a.artist_id === artist.id && a.watched);
       map.set(
         artist.id,
-        artistAlbums.length === 0
-          ? 0
-          : artistAlbums.filter((a) => a.folder_path !== null).length / artistAlbums.length
+        artist.album_count === 0 ? 0 : artist.on_disk_count / artist.album_count
       );
     }
     return map;
-  }, [artists, albums]);
+  }, [artists]);
 
   const sorted = useMemo(() => {
     const base = needle ? artists.filter((a) => a.name.toLowerCase().includes(needle)) : artists;

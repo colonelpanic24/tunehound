@@ -10,6 +10,8 @@ export interface Artist {
   folder_name: string | null;
   subscribed: boolean;
   created_at: string;
+  album_count: number;
+  on_disk_count: number;
 }
 
 export interface ReleaseGroup {
@@ -154,6 +156,32 @@ export interface OrphanedFilePage {
   total: number;
   offset: number;
   has_more: boolean;
+}
+
+export interface AlbumCounts {
+  all: number;
+  on_disk: number;
+  missing: number;
+}
+
+export interface AlbumsPage {
+  items: ReleaseGroup[];
+  total: number;
+  counts: AlbumCounts;
+}
+
+export interface AlbumGroup {
+  artist_id: number;
+  artist_name: string;
+  artist_sort_name: string | null;
+  artist_image_url: string | null;
+  albums: ReleaseGroup[];
+}
+
+export interface AlbumGroupsPage {
+  items: AlbumGroup[];
+  total: number;
+  counts: AlbumCounts;
 }
 
 // ── Artwork ────────────────────────────────────────────────────────────────────

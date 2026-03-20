@@ -1,5 +1,7 @@
 import type {
+  AlbumGroupsPage,
   AlbumTagStatus,
+  AlbumsPage,
   Artist,
   ArtistDiskStatus,
   ArtworkOption,
@@ -71,7 +73,39 @@ export const rematchArtist = (id: number, mbid: string) =>
 
 // ── Albums ─────────────────────────────────────────────────────────────────────
 
-export const listAlbums = () => request<ReleaseGroup[]>("/albums");
+export interface AlbumParams {
+  offset?: number;
+  limit?: number;
+  sort?: string;
+  dir?: string;
+  avail?: string;
+  search?: string;
+  watched_only?: boolean;
+}
+
+export const listAlbums = (params: AlbumParams = {}) => {
+  const q = new URLSearchParams();
+  if (params.offset !== undefined) q.set("offset", String(params.offset));
+  if (params.limit !== undefined) q.set("limit", String(params.limit));
+  if (params.sort) q.set("sort", params.sort);
+  if (params.dir) q.set("dir", params.dir);
+  if (params.avail) q.set("avail", params.avail);
+  if (params.search) q.set("search", params.search);
+  if (params.watched_only) q.set("watched_only", "true");
+  return request<AlbumsPage>(`/albums?${q}`);
+};
+
+export const listAlbumGroups = (params: AlbumParams = {}) => {
+  const q = new URLSearchParams();
+  q.set("grouped", "true");
+  if (params.offset !== undefined) q.set("offset", String(params.offset));
+  if (params.limit !== undefined) q.set("limit", String(params.limit));
+  if (params.dir) q.set("dir", params.dir);
+  if (params.avail) q.set("avail", params.avail);
+  if (params.search) q.set("search", params.search);
+  if (params.watched_only) q.set("watched_only", "true");
+  return request<AlbumGroupsPage>(`/albums?${q}`);
+};
 
 export const getAlbum = (id: number) => request<ReleaseGroup>(`/albums/${id}`);
 

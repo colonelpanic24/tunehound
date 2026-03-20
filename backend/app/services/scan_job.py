@@ -406,18 +406,19 @@ class ScanJobManager:
                             for t in g.get("secondary-type-list", [])
                         )
                     ]
-                    # Deduplicate by MBID — the API can return duplicates across
-                    # pages if the result set changes between requests.
-                    seen_mbids: set[str] = set()
-                    mb_groups_deduped = []
-                    for g in mb_groups:
-                        if g["id"] not in seen_mbids:
-                            seen_mbids.add(g["id"])
-                            mb_groups_deduped.append(g)
-                    mb_groups = mb_groups_deduped
+                    # Skip MBIDs already in the DB (same release group shared
+                    # across multiple artists, e.g. soundtracks).
+                    existing_rg = await db.execute(
+                        select(ReleaseGroup.mbid).where(
+                            ReleaseGroup.mbid.in_([mg["id"] for mg in mb_groups])
+                        )
+                    )
+                    existing_rg_mbids = {row[0] for row in existing_rg}
 
                     release_groups = []
                     for mg in mb_groups:
+                        if mg["id"] in existing_rg_mbids:
+                            continue
                         secondary = mg.get("secondary-type-list", [])
                         rg = ReleaseGroup(
                             mbid=mg["id"],
