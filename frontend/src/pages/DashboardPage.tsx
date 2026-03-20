@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -779,7 +778,7 @@ function NeedsReviewCard({
 function ImportLog({ log }: { log: import("@/context/ImportContext").ImportLogEntry[] }) {
   if (!log.length) return null;
   return (
-    <ScrollArea className="max-h-52 mt-2">
+    <div className="max-h-52 overflow-y-auto mt-2">
       <div className="space-y-0.5">
         {log.map((entry, i) => (
           <div key={i} className="flex items-center gap-2 text-sm py-0.5">
@@ -808,6 +807,6 @@ function ImportLog({ log }: { log: import("@/context/ImportContext").ImportLogEn
           </div>
         ))}
       </div>
-    </ScrollArea>
+    </div>
   );
 }

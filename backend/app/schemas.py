@@ -27,6 +27,8 @@ class ArtistOut(ArtistBase):
     folder_name: str | None = None
     subscribed: bool
     created_at: datetime
+    album_count: int = 0
+    on_disk_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -54,6 +56,32 @@ class ReleaseGroupOut(BaseModel):
 
 class ReleaseGroupUpdate(BaseModel):
     watched: bool | None = None
+
+
+class AlbumCounts(BaseModel):
+    all: int
+    on_disk: int
+    missing: int
+
+
+class AlbumsPage(BaseModel):
+    items: list[ReleaseGroupOut]
+    total: int
+    counts: AlbumCounts
+
+
+class AlbumGroup(BaseModel):
+    artist_id: int
+    artist_name: str
+    artist_sort_name: str | None
+    artist_image_url: str | None
+    albums: list[ReleaseGroupOut]
+
+
+class AlbumGroupsPage(BaseModel):
+    items: list[AlbumGroup]
+    total: int
+    counts: AlbumCounts
 
 
 # ── Track ──────────────────────────────────────────────────────────────────────
