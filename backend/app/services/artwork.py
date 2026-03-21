@@ -8,7 +8,7 @@ import shutil
 import httpx
 
 from app.config import settings
-from app.services.image_cache import _CONTENT_TYPE_EXT, _IMAGES_DIR, _find_cached
+from app.services.image_cache import _CONTENT_TYPE_EXT, _IMAGES_DIR, _find_cached, shrink_if_needed
 
 
 def hash_file(path: str) -> str | None:
@@ -140,10 +140,12 @@ async def overwrite_cached_image(kind: str, key: str, remote_url: str) -> str | 
             if resp.status_code != 200:
                 return None
             content_type = resp.headers.get("content-type", "").split(";")[0].strip()
-            ext = _CONTENT_TYPE_EXT.get(content_type, "jpg")
+            if content_type not in _CONTENT_TYPE_EXT:
+                return None
+            image_data, ext = shrink_if_needed(resp.content, content_type)
             dest = os.path.join(kind_dir, f"{key}.{ext}")
             with open(dest, "wb") as fh:
-                fh.write(resp.content)
+                fh.write(image_data)
             return f"/images/{kind}/{key}.{ext}"
     except Exception:
         return None
@@ -161,10 +163,10 @@ async def save_uploaded_image(kind: str, key: str, data: bytes, content_type: st
         except Exception:
             pass
 
-    ext = _CONTENT_TYPE_EXT.get(content_type, "jpg")
+    image_data, ext = shrink_if_needed(data, content_type)
     dest = os.path.join(kind_dir, f"{key}.{ext}")
     with open(dest, "wb") as fh:
-        fh.write(data)
+        fh.write(image_data)
     return f"/images/{kind}/{key}.{ext}"
 
 
