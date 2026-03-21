@@ -8,11 +8,21 @@ function getInitialTheme(): Theme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+function applyTheme(theme: Theme) {
+  document.documentElement.classList.remove("light", "dark");
+  document.documentElement.classList.add(theme);
+}
+
 export function useTheme() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
 
+  // Apply immediately on first render to prevent flash of wrong theme
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
+    applyTheme(getInitialTheme());
+  }, []);
+
+  useEffect(() => {
+    applyTheme(theme);
     localStorage.setItem("theme", theme);
   }, [theme]);
 

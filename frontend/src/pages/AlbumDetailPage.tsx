@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ArtworkPickerDialog } from "@/components/ArtworkPickerDialog";
 import { RetagDialog } from "@/components/RetagDialog";
+import { onWsEvent } from "@/context/WebSocketContext";
 import { cn } from "@/lib/utils";
 
 function formatDuration(ms: number | null): string {
@@ -106,32 +107,15 @@ export default function AlbumDetailPage() {
     },
   });
 
-  // Listen for WebSocket retag_complete to invalidate tag status
+  // Listen for retag_complete to invalidate tag status
   useEffect(() => {
     if (!activeRetagJobId) return;
-    const handler = (event: MessageEvent) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (
-          msg.type === "retag_complete" &&
-          msg.payload?.job_id === activeRetagJobId
-        ) {
-          queryClient.invalidateQueries({ queryKey: ["tag-status", albumId] });
-          queryClient.invalidateQueries({ queryKey: ["album-tracks", albumId] });
-          setActiveRetagJobId(null);
-        }
-      } catch {
-        // ignore malformed messages
-      }
-    };
-    // Find the shared WS — attach to the global socket if available
-    const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
-    const ws = new WebSocket(wsUrl);
-    ws.addEventListener("message", handler);
-    return () => {
-      ws.removeEventListener("message", handler);
-      ws.close();
-    };
+    return onWsEvent("retag_complete", (msg) => {
+      if (msg.payload.job_id !== activeRetagJobId) return;
+      queryClient.invalidateQueries({ queryKey: ["tag-status", albumId] });
+      queryClient.invalidateQueries({ queryKey: ["album-tracks", albumId] });
+      setActiveRetagJobId(null);
+    });
   }, [activeRetagJobId, albumId, queryClient]);
 
   // Build track lookup for retag dialog

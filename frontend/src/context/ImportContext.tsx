@@ -7,8 +7,8 @@ import {
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useWebSocketMessage } from "@/context/WebSocketContext";
-import type { Stats, WSMessage } from "@/types";
+import { onWsEvent } from "@/context/WebSocketContext";
+import type { Stats } from "@/types";
 
 const BASE = "/api";
 
@@ -167,9 +167,9 @@ export function ImportProvider({ children }: { children: ReactNode }) {
   }, [state.phase]);
 
   // WebSocket-driven updates
-  useWebSocketMessage((msg: WSMessage) => {
-    switch (msg.type) {
-      case "scan_started":
+  useEffect(() => {
+    const unsubs = [
+      onWsEvent("scan_started", (msg) =>
         setState((s) => ({
           ...s,
           phase: "scanning",
@@ -182,10 +182,10 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           summary: null,
           error: null,
           currentStep: null,
-        }));
-        break;
+        }))
+      ),
 
-      case "scan_progress":
+      onWsEvent("scan_progress", (msg) =>
         setState((s) => ({
           ...s,
           scanDone: msg.scan_done,
@@ -193,15 +193,12 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           importDone: msg.import_done,
           importTotal: msg.import_total,
           currentStep: msg.current_step,
-        }));
-        break;
+        }))
+      ),
 
-      case "scan_log":
-        setState((s) => ({
-          ...s,
-          log: [...s.log, mapLogEntry(msg.entry)],
-        }));
-        // Optimistically bump artists/albums and refetch full stats (tracks + files) on import
+      onWsEvent("scan_log", (msg) => {
+        setState((s) => ({ ...s, log: [...s.log, mapLogEntry(msg.entry)] }));
+        // Optimistically bump artists/albums and refetch full stats on import
         if (msg.entry.type === "imported") {
           queryClient.setQueryData<Stats>(["stats"], (old) =>
             old
@@ -214,14 +211,14 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           );
           queryClient.invalidateQueries({ queryKey: ["stats"] });
         }
-        break;
+      }),
 
-      case "scan_done":
+      onWsEvent("scan_done", (msg) => {
         setState((s) => ({
           ...s,
           phase: "done",
           currentStep: null,
-          completedAt: (msg.completed_at as string | null) ?? new Date().toISOString(),
+          completedAt: msg.completed_at ?? new Date().toISOString(),
           summary: {
             artistsImported: msg.summary.artists_imported,
             albumsImported: msg.summary.albums_imported,
@@ -234,20 +231,21 @@ export function ImportProvider({ children }: { children: ReactNode }) {
         queryClient.invalidateQueries({ queryKey: ["albums"] });
         queryClient.invalidateQueries({ queryKey: ["disk-status"] });
         queryClient.invalidateQueries({ queryKey: ["stats"] });
-        break;
+      }),
 
-      case "scan_error":
-        setState((s) => ({ ...s, phase: "idle", error: msg.error }));
-        break;
+      onWsEvent("scan_error", (msg) =>
+        setState((s) => ({ ...s, phase: "idle", error: msg.error }))
+      ),
 
-      case "artist_ready":
-        // Refresh artists, albums, and disk-status so availability updates live
+      onWsEvent("artist_ready", () => {
         queryClient.invalidateQueries({ queryKey: ["artists"] });
         queryClient.invalidateQueries({ queryKey: ["albums"] });
         queryClient.invalidateQueries({ queryKey: ["disk-status"] });
-        break;
-    }
-  });
+      }),
+    ];
+
+    return () => unsubs.forEach((u) => u());
+  }, [queryClient]);
 
   const startScan = useCallback(async () => {
     // Optimistically set scanning state so the UI responds immediately,
