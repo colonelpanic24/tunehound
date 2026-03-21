@@ -65,9 +65,14 @@ export default function Layout({ children }: Props) {
           {!collapsed && (
             <>
               <Music2 className="w-7 h-7 text-primary shrink-0" />
-              <span className="text-2xl font-bold tracking-tight text-foreground whitespace-nowrap overflow-hidden">
-                TuneHound
-              </span>
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold tracking-tight text-foreground whitespace-nowrap overflow-hidden">
+                  TuneHound
+                </span>
+                <span className="text-[10px] text-muted-foreground leading-none">
+                  v{__APP_VERSION__}
+                </span>
+              </div>
             </>
           )}
         </div>
